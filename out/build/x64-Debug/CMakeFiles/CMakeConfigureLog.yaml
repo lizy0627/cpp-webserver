@@ -1,0 +1,787 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      The system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.44.35222 版
+      版权所有(C) Microsoft Corporation。保留所有权利。
+      
+      CMakeCXXCompilerId.cpp
+      Microsoft (R) Incremental Linker Version 14.44.35222.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      /out:CMakeCXXCompilerId.exe 
+      CMakeCXXCompilerId.obj 
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+      
+      The CXX compiler identification is MSVC, found in:
+        D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/3.31.6-msvc6/CompilerIdCXX/CMakeCXXCompilerId.exe
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:1288 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:250 (CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Detecting CXX compiler /showIncludes prefix:
+        main.c
+        注意: 包含文件:  D:\\cpp-webserver\\out\\build\\x64-Debug\\CMakeFiles\\ShowIncludes\\foo.h
+        
+      Found prefix "注意: 包含文件:  "
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      The system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.44.35222 版
+      版权所有(C) Microsoft Corporation。保留所有权利。
+      
+      CMakeCXXCompilerId.cpp
+      Microsoft (R) Incremental Linker Version 14.44.35222.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      /out:CMakeCXXCompilerId.exe 
+      CMakeCXXCompilerId.obj 
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+      
+      The CXX compiler identification is MSVC, found in:
+        D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/3.31.6-msvc6/CompilerIdCXX/CMakeCXXCompilerId.exe
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:1288 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:250 (CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Detecting CXX compiler /showIncludes prefix:
+        main.c
+        注意: 包含文件:  D:\\cpp-webserver\\out\\build\\x64-Debug\\CMakeFiles\\ShowIncludes\\foo.h
+        
+      Found prefix "注意: 包含文件:  "
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/CMakeScratch/TryCompile-qyfobx"
+      binary: "D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/CMakeScratch/TryCompile-qyfobx"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /W3 /GR /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/CMakeScratch/TryCompile-qyfobx'
+        
+        Run Build Command(s): D:\\VS2022\\COMMON7\\IDE\\COMMONEXTENSIONS\\MICROSOFT\\CMAKE\\Ninja\\ninja.exe -v cmTC_a0717
+        [1/2] D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS /W3 /GR /EHsc  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\\cmTC_a0717.dir\\CMakeCXXCompilerABI.cpp.obj /FdCMakeFiles\\cmTC_a0717.dir\\ /FS -c D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\share\\cmake-3.31\\Modules\\CMakeCXXCompilerABI.cpp
+        [2/2] C:\\Windows\\system32\\cmd.exe /C "cd . && D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe -E vs_link_exe --msvc-ver=1944 --intdir=CMakeFiles\\cmTC_a0717.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe --manifests  -- D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe /nologo CMakeFiles\\cmTC_a0717.dir\\CMakeCXXCompilerABI.cpp.obj  /out:cmTC_a0717.exe /implib:cmTC_a0717.lib /pdb:cmTC_a0717.pdb /version:0.0 /machine:x64  /debug /INCREMENTAL /subsystem:console  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'CXX': D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/Internal/CMakeDetermineLinkerId.cmake:40 (message)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:255 (cmake_determine_linker_id)"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Running the CXX compiler's linker: "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35222.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      The system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      ENV{PATH}:
+        - "D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64"
+        - "D:\\VS2022\\Common7\\IDE\\VC\\VCPackages"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TestWindow"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TeamFoundation\\Team Explorer"
+        - "D:\\VS2022\\MSBuild\\Current\\bin\\Roslyn"
+        - "C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools\\x64\\"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\FSharp\\Tools"
+        - "D:\\VS2022\\Team Tools\\DiagnosticsHub\\Collector"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\\\x64"
+        - "D:\\VS2022\\\\MSBuild\\Current\\Bin\\amd64"
+        - "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319"
+        - "D:\\VS2022\\Common7\\IDE\\"
+        - "D:\\VS2022\\Common7\\Tools\\"
+        - "C:\\Users\\13192\\.codex\\tmp\\arg0\\codex-arg0AY47eV"
+        - "D:\\VS Code"
+        - "D:\\Linux\\bin\\"
+        - "D:\\JavaHomeWork\\maven-3.3.9\\maven-3.3.9\\apache-maven-3.3.9\\bin"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\bin"
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "D:\\Python\\Scripts\\"
+        - "D:\\Python\\"
+        - "Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\NVIDIA Corporation\\NVIDIA NvDLISR"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\150\\Tools\\Binn\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\jre\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "D:\\APP\\cursor\\resources\\app\\bin"
+        - "C:\\ffmpeg\\ffmpeg-8.0.1-essentials_build\\bin"
+        - "C:\\Program Files\\mingw64\\bin"
+        - "D:\\Node.js\\"
+        - "D:\\JavaDateBase\\mysql-5.7.32-winx64\\bin"
+        - "D:\\apache-tomcat-9.0.117\\bin"
+        - "D:\\Git\\bin"
+        - "D:\\Git\\cmd"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Users\\13192\\.local\\bin"
+        - "C:\\Users\\13192\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "D:\\QT\\6.5.3\\mingw_64\\bin"
+        - "D:\\QT\\Tools\\mingw1120_64\\bin"
+        - "D:\\VS Code\\bin"
+        - "C:\\Users\\13192\\AppData\\Local\\Programs\\EmEditor"
+        - "D:\\Idea\\IntelliJ IDEA Community Edition 2025.2.4\\bin"
+        - "C:\\Users\\13192\\.dotnet\\tools"
+        - "D:\\APP\\cursor\\resources\\app\\bin"
+        - "C:\\Users\\13192\\AppData\\Roaming\\npm"
+        - "c:\\Users\\13192\\.vscode\\extensions\\openai.chatgpt-26.429.30905-win32-x64\\bin\\windows-x86_64"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "D:\\VS2022\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
+        - "D:\\VS2022\\VC\\vcpkg"
+      CMAKE_INSTALL_PREFIX: "D:/cpp-webserver/out/install/x64-Debug"
+      ENV{INCLUDE}:
+        - "D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\include"
+        - "D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\ATLMFC\\include"
+        - "D:\\VS2022\\VC\\Auxiliary\\VS\\include"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\um"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\shared"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\winrt"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\\\include\\10.0.26100.0\\\\cppwinrt"
+        - "C:\\Program Files (x86)\\Windows Kits\\NETFXSDK\\4.8\\include\\um"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe 
+      Build flags: /DWIN32;/D_WINDOWS;/W3;/GR;/EHsc
+      Id flags:  
+      
+      The output was:
+      0
+      鐢ㄤ簬 x64 鐨?Microsoft (R) C/C++ 浼樺寲缂栬瘧鍣?19.44.35222 鐗?
+      鐗堟潈鎵€鏈?C) Microsoft Corporation銆備繚鐣欐墍鏈夋潈鍒┿€?
+      
+      CMakeCXXCompilerId.cpp
+      Microsoft (R) Incremental Linker Version 14.44.35222.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      /out:CMakeCXXCompilerId.exe 
+      CMakeCXXCompilerId.obj 
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+      
+      The CXX compiler identification is MSVC, found in:
+        D:/cpp-webserver/out/build/x64-Debug/CMakeFiles/4.3.2/CompilerIdCXX/CMakeCXXCompilerId.exe
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:1347 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:250 (CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Detecting CXX compiler /showIncludes prefix:
+        main.c
+        娉ㄦ剰: 鍖呭惈鏂囦欢:  D:\\cpp-webserver\\out\\build\\x64-Debug\\CMakeFiles\\ShowIncludes\\foo.h
+        
+      Found prefix "娉ㄦ剰: 鍖呭惈鏂囦欢:  "
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:5 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "D:/VS2022/Common7/IDE/VC/vcpackages/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TestWindow/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/"
+      - "D:/VS2022/MSBuild/Current/Bin/Roslyn/"
+      - "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/FSharp/Tools/"
+      - "D:/VS2022/Team Tools/DiagnosticsHub/Collector/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/x64/"
+      - "D:/VS2022/MSBuild/Current/Bin/amd64/"
+      - "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/"
+      - "D:/VS2022/Common7/IDE/"
+      - "D:/VS2022/Common7/Tools/"
+      - "C:/Users/13192/.codex/tmp/arg0/codex-arg0AY47eV/"
+      - "D:/VS Code/"
+      - "D:/Linux/bin/"
+      - "D:/JavaHomeWork/maven-3.3.9/maven-3.3.9/apache-maven-3.3.9/bin/"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/bin/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "D:/Python/Scripts/"
+      - "D:/Python/"
+      - "D:/cpp-webserver/Windows/system32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/NVIDIA Corporation/NVIDIA NvDLISR/"
+      - "C:/Windows/System32/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Program Files/Microsoft SQL Server/150/Tools/Binn/"
+      - "C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/jre/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "D:/APP/cursor/resources/app/bin/"
+      - "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin/"
+      - "C:/Program Files/mingw64/bin/"
+      - "D:/Node.js/"
+      - "D:/JavaDateBase/mysql-5.7.32-winx64/bin/"
+      - "D:/apache-tomcat-9.0.117/bin/"
+      - "D:/Git/bin/"
+      - "D:/Git/cmd/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Users/13192/.local/bin/"
+      - "C:/Users/13192/AppData/Local/Microsoft/WindowsApps/"
+      - "D:/QT/6.5.3/mingw_64/bin/"
+      - "D:/QT/Tools/mingw1120_64/bin/"
+      - "D:/VS Code/bin/"
+      - "C:/Users/13192/AppData/Local/Programs/EmEditor/"
+      - "D:/Idea/IntelliJ IDEA Community Edition 2025.2.4/bin/"
+      - "C:/Users/13192/.dotnet/tools/"
+      - "C:/Users/13192/AppData/Roaming/npm/"
+      - "C:/Users/13192/.vscode/extensions/openai.chatgpt-26.429.30905-win32-x64/bin/windows-x86_64/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "D:/VS2022/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
+      - "D:/VS2022/VC/vcpkg/"
+    searched_directories:
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64"
+        - "D:\\VS2022\\Common7\\IDE\\VC\\VCPackages"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TestWindow"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TeamFoundation\\Team Explorer"
+        - "D:\\VS2022\\MSBuild\\Current\\bin\\Roslyn"
+        - "C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools\\x64\\"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\FSharp\\Tools"
+        - "D:\\VS2022\\Team Tools\\DiagnosticsHub\\Collector"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\\\x64"
+        - "D:\\VS2022\\\\MSBuild\\Current\\Bin\\amd64"
+        - "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319"
+        - "D:\\VS2022\\Common7\\IDE\\"
+        - "D:\\VS2022\\Common7\\Tools\\"
+        - "C:\\Users\\13192\\.codex\\tmp\\arg0\\codex-arg0AY47eV"
+        - "D:\\VS Code"
+        - "D:\\Linux\\bin\\"
+        - "D:\\JavaHomeWork\\maven-3.3.9\\maven-3.3.9\\apache-maven-3.3.9\\bin"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\bin"
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "D:\\Python\\Scripts\\"
+        - "D:\\Python\\"
+        - "Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\NVIDIA Corporation\\NVIDIA NvDLISR"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\150\\Tools\\Binn\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\jre\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "D:\\APP\\cursor\\resources\\app\\bin"
+        - "C:\\ffmpeg\\ffmpeg-8.0.1-essentials_build\\bin"
+        - "C:\\Program Files\\mingw64\\bin"
+        - "D:\\Node.js\\"
+        - "D:\\JavaDateBase\\mysql-5.7.32-winx64\\bin"
+        - "D:\\apache-tomcat-9.0.117\\bin"
+        - "D:\\Git\\bin"
+        - "D:\\Git\\cmd"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Users\\13192\\.local\\bin"
+        - "C:\\Users\\13192\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "D:\\QT\\6.5.3\\mingw_64\\bin"
+        - "D:\\QT\\Tools\\mingw1120_64\\bin"
+        - "D:\\VS Code\\bin"
+        - "C:\\Users\\13192\\AppData\\Local\\Programs\\EmEditor"
+        - "D:\\Idea\\IntelliJ IDEA Community Edition 2025.2.4\\bin"
+        - "C:\\Users\\13192\\.dotnet\\tools"
+        - "D:\\APP\\cursor\\resources\\app\\bin"
+        - "C:\\Users\\13192\\AppData\\Roaming\\npm"
+        - "c:\\Users\\13192\\.vscode\\extensions\\openai.chatgpt-26.429.30905-win32-x64\\bin\\windows-x86_64"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "D:\\VS2022\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
+        - "D:\\VS2022\\VC\\vcpkg"
+      CMAKE_INSTALL_PREFIX: "D:/cpp-webserver/out/install/x64-Debug"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:5 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "D:/VS2022/Common7/IDE/VC/vcpackages/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TestWindow/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/"
+      - "D:/VS2022/MSBuild/Current/Bin/Roslyn/"
+      - "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/FSharp/Tools/"
+      - "D:/VS2022/Team Tools/DiagnosticsHub/Collector/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/x64/"
+      - "D:/VS2022/MSBuild/Current/Bin/amd64/"
+      - "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/"
+      - "D:/VS2022/Common7/IDE/"
+      - "D:/VS2022/Common7/Tools/"
+      - "C:/Users/13192/.codex/tmp/arg0/codex-arg0AY47eV/"
+      - "D:/VS Code/"
+      - "D:/Linux/bin/"
+      - "D:/JavaHomeWork/maven-3.3.9/maven-3.3.9/apache-maven-3.3.9/bin/"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/bin/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "D:/Python/Scripts/"
+      - "D:/Python/"
+      - "D:/cpp-webserver/Windows/system32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/NVIDIA Corporation/NVIDIA NvDLISR/"
+      - "C:/Windows/System32/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Program Files/Microsoft SQL Server/150/Tools/Binn/"
+      - "C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/jre/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "D:/APP/cursor/resources/app/bin/"
+      - "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin/"
+      - "C:/Program Files/mingw64/bin/"
+      - "D:/Node.js/"
+      - "D:/JavaDateBase/mysql-5.7.32-winx64/bin/"
+      - "D:/apache-tomcat-9.0.117/bin/"
+      - "D:/Git/bin/"
+      - "D:/Git/cmd/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Users/13192/.local/bin/"
+      - "C:/Users/13192/AppData/Local/Microsoft/WindowsApps/"
+      - "D:/QT/6.5.3/mingw_64/bin/"
+      - "D:/QT/Tools/mingw1120_64/bin/"
+      - "D:/VS Code/bin/"
+      - "C:/Users/13192/AppData/Local/Programs/EmEditor/"
+      - "D:/Idea/IntelliJ IDEA Community Edition 2025.2.4/bin/"
+      - "C:/Users/13192/.dotnet/tools/"
+      - "C:/Users/13192/AppData/Roaming/npm/"
+      - "C:/Users/13192/.vscode/extensions/openai.chatgpt-26.429.30905-win32-x64/bin/windows-x86_64/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "D:/VS2022/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
+      - "D:/VS2022/VC/vcpkg/"
+    searched_directories:
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "D:/VS2022/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "D:/VS2022/Common7/IDE/VC/vcpackages/lld-link.com"
+      - "D:/VS2022/Common7/IDE/VC/vcpackages/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/VC/vcpackages/lld-link"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TestWindow/lld-link.com"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TestWindow/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TestWindow/lld-link"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/lld-link.com"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/lld-link"
+      - "D:/VS2022/MSBuild/Current/Bin/Roslyn/lld-link.com"
+      - "D:/VS2022/MSBuild/Current/Bin/Roslyn/lld-link.exe"
+      - "D:/VS2022/MSBuild/Current/Bin/Roslyn/lld-link"
+      - "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/lld-link"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/FSharp/Tools/lld-link.com"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/FSharp/Tools/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/FSharp/Tools/lld-link"
+      - "D:/VS2022/Team Tools/DiagnosticsHub/Collector/lld-link.com"
+      - "D:/VS2022/Team Tools/DiagnosticsHub/Collector/lld-link.exe"
+      - "D:/VS2022/Team Tools/DiagnosticsHub/Collector/lld-link"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/x64/lld-link.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/x64/lld-link"
+      - "D:/VS2022/MSBuild/Current/Bin/amd64/lld-link.com"
+      - "D:/VS2022/MSBuild/Current/Bin/amd64/lld-link.exe"
+      - "D:/VS2022/MSBuild/Current/Bin/amd64/lld-link"
+      - "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/lld-link.com"
+      - "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/lld-link.exe"
+      - "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/lld-link"
+      - "D:/VS2022/Common7/IDE/lld-link.com"
+      - "D:/VS2022/Common7/IDE/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/lld-link"
+      - "D:/VS2022/Common7/Tools/lld-link.com"
+      - "D:/VS2022/Common7/Tools/lld-link.exe"
+      - "D:/VS2022/Common7/Tools/lld-link"
+      - "C:/Users/13192/.codex/tmp/arg0/codex-arg0AY47eV/lld-link.com"
+      - "C:/Users/13192/.codex/tmp/arg0/codex-arg0AY47eV/lld-link.exe"
+      - "C:/Users/13192/.codex/tmp/arg0/codex-arg0AY47eV/lld-link"
+      - "D:/VS Code/lld-link.com"
+      - "D:/VS Code/lld-link.exe"
+      - "D:/VS Code/lld-link"
+      - "D:/Linux/bin/lld-link.com"
+      - "D:/Linux/bin/lld-link.exe"
+      - "D:/Linux/bin/lld-link"
+      - "D:/JavaHomeWork/maven-3.3.9/maven-3.3.9/apache-maven-3.3.9/bin/lld-link.com"
+      - "D:/JavaHomeWork/maven-3.3.9/maven-3.3.9/apache-maven-3.3.9/bin/lld-link.exe"
+      - "D:/JavaHomeWork/maven-3.3.9/maven-3.3.9/apache-maven-3.3.9/bin/lld-link"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/bin/lld-link.com"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/bin/lld-link.exe"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/bin/lld-link"
+      - "C:/Python314/Scripts/lld-link.com"
+      - "C:/Python314/Scripts/lld-link.exe"
+      - "C:/Python314/Scripts/lld-link"
+      - "C:/Python314/lld-link.com"
+      - "C:/Python314/lld-link.exe"
+      - "C:/Python314/lld-link"
+      - "D:/Python/Scripts/lld-link.com"
+      - "D:/Python/Scripts/lld-link.exe"
+      - "D:/Python/Scripts/lld-link"
+      - "D:/Python/lld-link.com"
+      - "D:/Python/lld-link.exe"
+      - "D:/Python/lld-link"
+      - "D:/cpp-webserver/Windows/system32/lld-link.com"
+      - "D:/cpp-webserver/Windows/system32/lld-link.exe"
+      - "D:/cpp-webserver/Windows/system32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link"
+      - "C:/Program Files/NVIDIA Corporation/NVIDIA NvDLISR/lld-link.com"
+      - "C:/Program Files/NVIDIA Corporation/NVIDIA NvDLISR/lld-link.exe"
+      - "C:/Program Files/NVIDIA Corporation/NVIDIA NvDLISR/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Program Files/dotnet/lld-link.com"
+      - "C:/Program Files/dotnet/lld-link.exe"
+      - "C:/Program Files/dotnet/lld-link"
+      - "C:/Program Files/Microsoft SQL Server/150/Tools/Binn/lld-link.com"
+      - "C:/Program Files/Microsoft SQL Server/150/Tools/Binn/lld-link.exe"
+      - "C:/Program Files/Microsoft SQL Server/150/Tools/Binn/lld-link"
+      - "C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/lld-link.com"
+      - "C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/lld-link.exe"
+      - "C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/lld-link"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/jre/bin/lld-link.com"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/jre/bin/lld-link.exe"
+      - "D:/JavaJDK/Java/jdk1.8.0_211/jre/bin/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.com"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link"
+      - "D:/APP/cursor/resources/app/bin/lld-link.com"
+      - "D:/APP/cursor/resources/app/bin/lld-link.exe"
+      - "D:/APP/cursor/resources/app/bin/lld-link"
+      - "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin/lld-link.com"
+      - "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin/lld-link.exe"
+      - "C:/ffmpeg/ffmpeg-8.0.1-essentials_build/bin/lld-link"
+      - "C:/Program Files/mingw64/bin/lld-link.com"
+      - "C:/Program Files/mingw64/bin/lld-link.exe"
+      - "C:/Program Files/mingw64/bin/lld-link"
+      - "D:/Node.js/lld-link.com"
+      - "D:/Node.js/lld-link.exe"
+      - "D:/Node.js/lld-link"
+      - "D:/JavaDateBase/mysql-5.7.32-winx64/bin/lld-link.com"
+      - "D:/JavaDateBase/mysql-5.7.32-winx64/bin/lld-link.exe"
+      - "D:/JavaDateBase/mysql-5.7.32-winx64/bin/lld-link"
+      - "D:/apache-tomcat-9.0.117/bin/lld-link.com"
+      - "D:/apache-tomcat-9.0.117/bin/lld-link.exe"
+      - "D:/apache-tomcat-9.0.117/bin/lld-link"
+      - "D:/Git/bin/lld-link.com"
+      - "D:/Git/bin/lld-link.exe"
+      - "D:/Git/bin/lld-link"
+      - "D:/Git/cmd/lld-link.com"
+      - "D:/Git/cmd/lld-link.exe"
+      - "D:/Git/cmd/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Users/13192/.local/bin/lld-link.com"
+      - "C:/Users/13192/.local/bin/lld-link.exe"
+      - "C:/Users/13192/.local/bin/lld-link"
+      - "C:/Users/13192/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/13192/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/13192/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "D:/QT/6.5.3/mingw_64/bin/lld-link.com"
+      - "D:/QT/6.5.3/mingw_64/bin/lld-link.exe"
+      - "D:/QT/6.5.3/mingw_64/bin/lld-link"
+      - "D:/QT/Tools/mingw1120_64/bin/lld-link.com"
+      - "D:/QT/Tools/mingw1120_64/bin/lld-link.exe"
+      - "D:/QT/Tools/mingw1120_64/bin/lld-link"
+      - "D:/VS Code/bin/lld-link.com"
+      - "D:/VS Code/bin/lld-link.exe"
+      - "D:/VS Code/bin/lld-link"
+      - "C:/Users/13192/AppData/Local/Programs/EmEditor/lld-link.com"
+      - "C:/Users/13192/AppData/Local/Programs/EmEditor/lld-link.exe"
+      - "C:/Users/13192/AppData/Local/Programs/EmEditor/lld-link"
+      - "D:/Idea/IntelliJ IDEA Community Edition 2025.2.4/bin/lld-link.com"
+      - "D:/Idea/IntelliJ IDEA Community Edition 2025.2.4/bin/lld-link.exe"
+      - "D:/Idea/IntelliJ IDEA Community Edition 2025.2.4/bin/lld-link"
+      - "C:/Users/13192/.dotnet/tools/lld-link.com"
+      - "C:/Users/13192/.dotnet/tools/lld-link.exe"
+      - "C:/Users/13192/.dotnet/tools/lld-link"
+      - "C:/Users/13192/AppData/Roaming/npm/lld-link.com"
+      - "C:/Users/13192/AppData/Roaming/npm/lld-link.exe"
+      - "C:/Users/13192/AppData/Roaming/npm/lld-link"
+      - "C:/Users/13192/.vscode/extensions/openai.chatgpt-26.429.30905-win32-x64/bin/windows-x86_64/lld-link.com"
+      - "C:/Users/13192/.vscode/extensions/openai.chatgpt-26.429.30905-win32-x64/bin/windows-x86_64/lld-link.exe"
+      - "C:/Users/13192/.vscode/extensions/openai.chatgpt-26.429.30905-win32-x64/bin/windows-x86_64/lld-link"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.com"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link.com"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link"
+      - "D:/VS2022/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/lld-link.com"
+      - "D:/VS2022/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/lld-link.exe"
+      - "D:/VS2022/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/lld-link"
+      - "D:/VS2022/VC/vcpkg/lld-link.com"
+      - "D:/VS2022/VC/vcpkg/lld-link.exe"
+      - "D:/VS2022/VC/vcpkg/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "D:\\VS2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64"
+        - "D:\\VS2022\\Common7\\IDE\\VC\\VCPackages"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TestWindow"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\TeamFoundation\\Team Explorer"
+        - "D:\\VS2022\\MSBuild\\Current\\bin\\Roslyn"
+        - "C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools\\x64\\"
+        - "D:\\VS2022\\Common7\\IDE\\CommonExtensions\\Microsoft\\FSharp\\Tools"
+        - "D:\\VS2022\\Team Tools\\DiagnosticsHub\\Collector"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\\\x64"
+        - "D:\\VS2022\\\\MSBuild\\Current\\Bin\\amd64"
+        - "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319"
+        - "D:\\VS2022\\Common7\\IDE\\"
+        - "D:\\VS2022\\Common7\\Tools\\"
+        - "C:\\Users\\13192\\.codex\\tmp\\arg0\\codex-arg0AY47eV"
+        - "D:\\VS Code"
+        - "D:\\Linux\\bin\\"
+        - "D:\\JavaHomeWork\\maven-3.3.9\\maven-3.3.9\\apache-maven-3.3.9\\bin"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\bin"
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "D:\\Python\\Scripts\\"
+        - "D:\\Python\\"
+        - "Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\NVIDIA Corporation\\NVIDIA NvDLISR"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\150\\Tools\\Binn\\"
+        - "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\"
+        - "D:\\JavaJDK\\Java\\jdk1.8.0_211\\jre\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Win
