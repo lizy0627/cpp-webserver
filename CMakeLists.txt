@@ -5,16 +5,31 @@ project(CppWebServer LANGUAGES CXX)
 
 # 使用 C++17 标准，并要求编译器必须支持该标准。
 set(CMAKE_CXX_STANDARD 17)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(WARNING "CppWebServer uses Linux epoll and POSIX sockets; build and run it on Linux.")
+endif()
+
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(Threads REQUIRED)
 
 # 创建可执行程序，并明确列出项目源文件。
 add_executable(WebServer
     src/main.cpp
     src/Server.cpp
+    src/HttpParser.cpp
+    src/HttpResponse.cpp
+    src/Logger.cpp
+    src/StaticFileHandler.cpp
+    src/ThreadPool.cpp
 )
 
 # 添加公共头文件搜索目录，让源文件可以包含 include/Server.h。
 target_include_directories(WebServer PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(WebServer PRIVATE
+    Threads::Threads
 )
