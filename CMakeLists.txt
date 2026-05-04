@@ -8,23 +8,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# MSVC 使用 UTF-8 读取源码，保证中文注释不会乱码。
-if(MSVC)
-    add_compile_options(/utf-8)
-endif()
-
 # 创建可执行程序，并明确列出项目源文件。
 add_executable(WebServer
     src/main.cpp
     src/Server.cpp
 )
 
-# 添加公共头文件搜索目录。
+# 添加公共头文件搜索目录，让源文件可以包含 include/Server.h。
 target_include_directories(WebServer PRIVATE
     ${PROJECT_SOURCE_DIR}/include
 )
-
-# Windows 下链接 Winsock 库，提供 socket、bind、listen、accept 等 API。
-if(WIN32)
-    target_link_libraries(WebServer PRIVATE ws2_32)
-endif()
