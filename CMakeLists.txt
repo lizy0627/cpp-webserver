@@ -18,6 +18,7 @@ find_package(Threads REQUIRED)
 add_executable(WebServer
     src/main.cpp
     src/Server.cpp
+    src/Config.cpp
     src/HttpParser.cpp
     src/HttpResponse.cpp
     src/Logger.cpp

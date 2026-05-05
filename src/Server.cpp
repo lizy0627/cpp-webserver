@@ -5,12 +5,15 @@
 #include "Logger.h"
 #include "StaticFileHandler.h"
 
+#include <chrono>
 #include <cerrno>
 #include <cstdio>
 #include <exception>
 #include <fcntl.h>
 #include <string>
 #include <sys/epoll.h>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -30,10 +33,6 @@ public:
 
     int get() const {
         return socket_;
-    }
-
-    void release() {
-        socket_ = -1;
     }
 
 private:
@@ -62,6 +61,14 @@ private:
     int fd_;
 };
 
+enum class HeaderReadStatus {
+    Complete,
+    ClientClosed,
+    Incomplete,
+    TooLarge,
+    Error
+};
+
 bool wouldBlock() {
     return errno == EAGAIN || errno == EWOULDBLOCK;
 }
@@ -82,6 +89,10 @@ bool addSocketToEpoll(int epollFd, int socket, uint32_t events) {
     return epoll_ctl(epollFd, EPOLL_CTL_ADD, socket, &event) != -1;
 }
 
+bool removeSocketFromEpoll(int epollFd, int socket) {
+    return epoll_ctl(epollFd, EPOLL_CTL_DEL, socket, nullptr) != -1;
+}
+
 HttpResponse makeTextResponse(int statusCode,
                               const std::string& statusText,
                               const std::string& body) {
@@ -89,11 +100,112 @@ HttpResponse makeTextResponse(int statusCode,
     response.setBody(body);
     return response;
 }
+
+HeaderReadStatus readHttpHeader(int socket, std::string& rawRequest) {
+    constexpr std::size_t bufferSize = 1024;
+    constexpr std::size_t maxHeaderSize = 8192;
+    constexpr int maxWouldBlockRetries = 3;
+
+    char buffer[bufferSize]{};
+    int wouldBlockRetries = 0;
+
+    while (true) {
+        const ssize_t bytesRead = recv(socket, buffer, sizeof(buffer), 0);
+
+        if (bytesRead > 0) {
+            rawRequest.append(buffer, static_cast<std::size_t>(bytesRead));
+            wouldBlockRetries = 0;
+
+            if (rawRequest.size() > maxHeaderSize) {
+                Logger::warn("request header too large");
+                return HeaderReadStatus::TooLarge;
+            }
+
+            if (rawRequest.find("\r\n\r\n") != std::string::npos) {
+                return HeaderReadStatus::Complete;
+            }
+
+            continue;
+        }
+
+        if (bytesRead == 0) {
+            return rawRequest.empty()
+                ? HeaderReadStatus::ClientClosed
+                : HeaderReadStatus::Incomplete;
+        }
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        if (wouldBlock()) {
+            if (++wouldBlockRetries > maxWouldBlockRetries) {
+                Logger::warn("request header was not fully received before socket would block");
+                return HeaderReadStatus::Incomplete;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+
+        Logger::error("recv failed");
+        perror("recv failed");
+        return HeaderReadStatus::Error;
+    }
 }
 
-Server::Server(unsigned short port)
+bool sendAll(int socket, const std::string& data) {
+    std::size_t sentBytes = 0;
+    int wouldBlockRetries = 0;
+    constexpr int maxWouldBlockRetries = 3;
+
+    while (sentBytes < data.size()) {
+        const ssize_t result = send(
+            socket,
+            data.data() + sentBytes,
+            data.size() - sentBytes,
+            0);
+
+        if (result > 0) {
+            sentBytes += static_cast<std::size_t>(result);
+            wouldBlockRetries = 0;
+            continue;
+        }
+
+        if (result == 0) {
+            Logger::warn("send returned 0 before response was fully sent");
+            return false;
+        }
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        if (wouldBlock()) {
+            if (++wouldBlockRetries > maxWouldBlockRetries) {
+                Logger::warn("send would block, response was not fully sent");
+                return false;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+
+        Logger::error("send failed");
+        perror("send failed");
+        return false;
+    }
+
+    return true;
+}
+}
+
+Server::Server(unsigned short port, std::size_t threadCount, std::string rootDirectory)
     : port_(port),
-      serverSocket_(-1) {}
+      serverSocket_(-1),
+      threadPool_(threadCount),
+      rootDirectory_(std::move(rootDirectory)),
+      staticFileHandler_(rootDirectory_) {}
 
 Server::~Server() {
     if (serverSocket_ != -1) {
@@ -214,7 +326,24 @@ void Server::acceptLoop() {
             }
 
             if ((readyEvents & EPOLLIN) != 0) {
-                handleClient(readySocket);
+                if (!removeSocketFromEpoll(epollFd, readySocket)) {
+                    Logger::error("failed to remove client socket from epoll before dispatch");
+                    perror("epoll_ctl failed");
+                    close(readySocket);
+                    continue;
+                }
+
+                try {
+                    threadPool_.enqueue([this, readySocket]() {
+                        handleClient(readySocket);
+                    });
+                } catch (const std::exception& exception) {
+                    Logger::error("failed to enqueue client task: " + std::string(exception.what()));
+                    close(readySocket);
+                } catch (...) {
+                    Logger::error("failed to enqueue client task");
+                    close(readySocket);
+                }
             }
         }
     }
@@ -255,33 +384,27 @@ void Server::acceptReadyClients(int epollFd) {
 
 void Server::handleClient(int clientSocket) {
     ClientSocketGuard client(clientSocket);
-    char buffer[1024]{};
-    const ssize_t bytesRead = recv(client.get(), buffer, sizeof(buffer) - 1, 0);
 
-    if (bytesRead == -1 && wouldBlock()) {
-        client.release();
-        return;
-    }
-
-    if (bytesRead == -1) {
-        Logger::error("recv failed");
-        perror("recv failed");
-        return;
-    }
-
-    if (bytesRead == 0) {
-        Logger::info("client closed connection");
-        return;
-    }
-
+    std::string rawRequest;
     HttpResponse response;
     HttpRequest request;
-    StaticFileHandler staticFiles;
 
     try {
-        // Invalid HTTP syntax maps to 400; unsupported methods are handled separately.
-        if (bytesRead <= 0 ||
-            !HttpParser::parse(std::string(buffer, static_cast<std::size_t>(bytesRead)), request)) {
+        const HeaderReadStatus readStatus = readHttpHeader(client.get(), rawRequest);
+        if (readStatus == HeaderReadStatus::ClientClosed) {
+            Logger::info("client closed connection");
+            return;
+        }
+
+        if (readStatus == HeaderReadStatus::TooLarge) {
+            response = makeTextResponse(413, "Payload Too Large", "Payload Too Large");
+        } else if (readStatus == HeaderReadStatus::Incomplete) {
+            Logger::warn("incomplete request header received");
+            response = makeTextResponse(400, "Bad Request", "Bad Request");
+        } else if (readStatus == HeaderReadStatus::Error) {
+            return;
+        } else if (!HttpParser::parse(rawRequest, request)) {
+            // Invalid HTTP syntax maps to 400; unsupported methods are handled separately.
             Logger::warn("bad request received");
             response = makeTextResponse(400, "Bad Request", "Bad Request");
         } else if (request.method != "GET") {
@@ -289,7 +412,7 @@ void Server::handleClient(int clientSocket) {
             response = makeTextResponse(405, "Method Not Allowed", "Method Not Allowed");
         } else {
             Logger::info("request path: " + request.path);
-            const StaticFileResult file = staticFiles.handle(request.path);
+            const StaticFileResult file = staticFileHandler_.handle(request.path);
             if (file.status == StaticFileResult::Status::Ok) {
                 response = makeTextResponse(200, "OK", file.body);
                 response.setContentType(file.contentType);
@@ -308,5 +431,5 @@ void Server::handleClient(int clientSocket) {
 
     Logger::info("response status: " + std::to_string(response.statusCode()));
     const std::string rawResponse = response.toString();
-    send(client.get(), rawResponse.c_str(), rawResponse.size(), 0);
+    sendAll(client.get(), rawResponse);
 }
