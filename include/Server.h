@@ -1,15 +1,13 @@
 #pragma once
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <cstddef>
+#include <memory>
 #include <string>
 
 #include "StaticFileHandler.h"
 #include "ThreadPool.h"
+
+class HttpRequest;
 
 class Server {
 public:
@@ -22,16 +20,27 @@ public:
     bool start();
 
 private:
+    struct Impl;
+
     bool createSocket();
+    bool createEventFd();
     bool bindSocket();
     bool listenSocket();
     void acceptLoop();
     void acceptReadyClients(int epollFd);
-    void handleClient(int clientSocket);
+    void handleConnectionEvent(int epollFd, int fd, unsigned int events);
+    void handleCompletionEvent(int epollFd);
+    void readFromConnection(int epollFd, int fd);
+    void writeToConnection(int epollFd, int fd);
+    void processReadBuffer(int epollFd, int fd);
+    void queueResponse(int fd, unsigned long long connectionId, std::string response);
+    void closeConnection(int epollFd, int fd);
+    std::string buildResponse(const HttpRequest& request) const;
+    void notifyCompletionEvent();
 
     unsigned short port_;
-    int serverSocket_;
     ThreadPool threadPool_;
     std::string rootDirectory_;
     StaticFileHandler staticFileHandler_;
+    std::unique_ptr<Impl> impl_;
 };

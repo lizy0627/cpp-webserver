@@ -1,11 +1,15 @@
 #include "ThreadPool.h"
 
+#include "Logger.h"
+
 #include <algorithm>
-#include <stdexcept>
+#include <exception>
+#include <string>
 #include <utility>
 
-ThreadPool::ThreadPool(std::size_t threadCount)
-    : stopping_(false) {
+ThreadPool::ThreadPool(std::size_t threadCount, std::size_t maxQueueSize)
+    : maxQueueSize_(std::max<std::size_t>(1, maxQueueSize)),
+      stopping_(false) {
     const std::size_t count = std::max<std::size_t>(1, threadCount);
     workers_.reserve(count);
 
@@ -30,17 +34,18 @@ ThreadPool::~ThreadPool() {
     }
 }
 
-void ThreadPool::enqueue(std::function<void()> task) {
+bool ThreadPool::enqueue(std::function<void()> task) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (stopping_) {
-            throw std::runtime_error("cannot enqueue task after thread pool stop");
+        if (stopping_ || tasks_.size() >= maxQueueSize_) {
+            return false;
         }
 
         tasks_.push(std::move(task));
     }
 
     condition_.notify_one();
+    return true;
 }
 
 void ThreadPool::workerLoop() {
@@ -62,8 +67,10 @@ void ThreadPool::workerLoop() {
 
         try {
             task();
+        } catch (const std::exception& exception) {
+            Logger::error("thread pool task failed: " + std::string(exception.what()));
         } catch (...) {
-            // Keep worker threads alive even if a task fails unexpectedly.
+            Logger::error("thread pool task failed with unknown exception");
         }
     }
 }

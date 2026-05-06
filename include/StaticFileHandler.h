@@ -1,10 +1,12 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 
 struct StaticFileResult {
     enum class Status {
         Ok,
+        Forbidden,
         NotFound,
         BadRequest,
         Error
@@ -22,8 +24,11 @@ public:
     StaticFileResult handle(const std::string& requestPath) const;
 
 private:
-    static std::string contentTypeForPath(const std::string& path);
-    static bool buildSafeRelativePath(const std::string& requestPath, std::string& relativePath);
+    static std::string contentTypeForPath(const std::filesystem::path& path);
+    StaticFileResult::Status resolveRequestPath(
+        const std::string& requestPath,
+        std::filesystem::path& filePath) const;
 
-    std::string rootDirectory_;
+    std::filesystem::path rootDirectory_;
+    bool rootDirectoryReady_;
 };

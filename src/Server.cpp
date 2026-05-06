@@ -5,68 +5,81 @@
 #include "Logger.h"
 #include "StaticFileHandler.h"
 
-#include <chrono>
+#include <arpa/inet.h>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
+#include <deque>
 #include <exception>
 #include <fcntl.h>
+#include <mutex>
+#include <netinet/in.h>
 #include <string>
 #include <sys/epoll.h>
-#include <thread>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
-class ClientSocketGuard {
+constexpr std::size_t maxRequestHeaderSize = 8192;
+constexpr int invalidFd = -1;
+
+class UniqueFd {
 public:
-    explicit ClientSocketGuard(int socket)
-        : socket_(socket) {}
+    UniqueFd() = default;
 
-    ~ClientSocketGuard() {
-        if (socket_ != -1) {
-            close(socket_);
-        }
-    }
-
-    ClientSocketGuard(const ClientSocketGuard&) = delete;
-    ClientSocketGuard& operator=(const ClientSocketGuard&) = delete;
-
-    int get() const {
-        return socket_;
-    }
-
-private:
-    int socket_;
-};
-
-class FileDescriptorGuard {
-public:
-    explicit FileDescriptorGuard(int fd)
+    explicit UniqueFd(int fd)
         : fd_(fd) {}
 
-    ~FileDescriptorGuard() {
-        if (fd_ != -1) {
-            close(fd_);
-        }
+    ~UniqueFd() {
+        reset();
     }
 
-    FileDescriptorGuard(const FileDescriptorGuard&) = delete;
-    FileDescriptorGuard& operator=(const FileDescriptorGuard&) = delete;
+    UniqueFd(const UniqueFd&) = delete;
+    UniqueFd& operator=(const UniqueFd&) = delete;
+
+    UniqueFd(UniqueFd&& other) noexcept
+        : fd_(other.release()) {}
+
+    UniqueFd& operator=(UniqueFd&& other) noexcept {
+        if (this != &other) {
+            reset(other.release());
+        }
+        return *this;
+    }
 
     int get() const {
         return fd_;
     }
 
+    bool valid() const {
+        return fd_ != invalidFd;
+    }
+
+    int release() {
+        const int fd = fd_;
+        fd_ = invalidFd;
+        return fd;
+    }
+
+    void reset(int fd = invalidFd) {
+        if (fd_ != invalidFd) {
+            close(fd_);
+        }
+        fd_ = fd;
+    }
+
 private:
-    int fd_;
+    int fd_ = invalidFd;
 };
 
-enum class HeaderReadStatus {
-    Complete,
-    ClientClosed,
-    Incomplete,
-    TooLarge,
-    Error
+struct Completion {
+    int fd = invalidFd;
+    unsigned long long connectionId = 0;
+    std::string response;
 };
 
 bool wouldBlock() {
@@ -82,15 +95,24 @@ bool setNonBlocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1;
 }
 
-bool addSocketToEpoll(int epollFd, int socket, uint32_t events) {
+bool addSocketToEpoll(int epollFd, int fd, uint32_t events) {
     epoll_event event{};
     event.events = events;
-    event.data.fd = socket;
-    return epoll_ctl(epollFd, EPOLL_CTL_ADD, socket, &event) != -1;
+    event.data.fd = fd;
+    return epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &event) != -1;
 }
 
-bool removeSocketFromEpoll(int epollFd, int socket) {
-    return epoll_ctl(epollFd, EPOLL_CTL_DEL, socket, nullptr) != -1;
+bool modifySocketInEpoll(int epollFd, int fd, uint32_t events) {
+    epoll_event event{};
+    event.events = events;
+    event.data.fd = fd;
+    return epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &event) != -1;
+}
+
+void removeSocketFromEpoll(int epollFd, int fd) {
+    if (epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr) == -1 && errno != ENOENT && errno != EBADF) {
+        Logger::warn("failed to remove fd from epoll");
+    }
 }
 
 HttpResponse makeTextResponse(int statusCode,
@@ -101,117 +123,67 @@ HttpResponse makeTextResponse(int statusCode,
     return response;
 }
 
-HeaderReadStatus readHttpHeader(int socket, std::string& rawRequest) {
-    constexpr std::size_t bufferSize = 1024;
-    constexpr std::size_t maxHeaderSize = 8192;
-    constexpr int maxWouldBlockRetries = 3;
-
-    char buffer[bufferSize]{};
-    int wouldBlockRetries = 0;
-
-    while (true) {
-        const ssize_t bytesRead = recv(socket, buffer, sizeof(buffer), 0);
-
-        if (bytesRead > 0) {
-            rawRequest.append(buffer, static_cast<std::size_t>(bytesRead));
-            wouldBlockRetries = 0;
-
-            if (rawRequest.size() > maxHeaderSize) {
-                Logger::warn("request header too large");
-                return HeaderReadStatus::TooLarge;
-            }
-
-            if (rawRequest.find("\r\n\r\n") != std::string::npos) {
-                return HeaderReadStatus::Complete;
-            }
-
-            continue;
-        }
-
-        if (bytesRead == 0) {
-            return rawRequest.empty()
-                ? HeaderReadStatus::ClientClosed
-                : HeaderReadStatus::Incomplete;
-        }
-
-        if (errno == EINTR) {
-            continue;
-        }
-
-        if (wouldBlock()) {
-            if (++wouldBlockRetries > maxWouldBlockRetries) {
-                Logger::warn("request header was not fully received before socket would block");
-                return HeaderReadStatus::Incomplete;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-
-        Logger::error("recv failed");
-        perror("recv failed");
-        return HeaderReadStatus::Error;
-    }
+std::string makeTextResponseString(int statusCode,
+                                   const std::string& statusText,
+                                   const std::string& body) {
+    return makeTextResponse(statusCode, statusText, body).toString();
 }
 
-bool sendAll(int socket, const std::string& data) {
-    std::size_t sentBytes = 0;
-    int wouldBlockRetries = 0;
-    constexpr int maxWouldBlockRetries = 3;
-
-    while (sentBytes < data.size()) {
-        const ssize_t result = send(
-            socket,
-            data.data() + sentBytes,
-            data.size() - sentBytes,
-            0);
-
-        if (result > 0) {
-            sentBytes += static_cast<std::size_t>(result);
-            wouldBlockRetries = 0;
-            continue;
-        }
-
-        if (result == 0) {
-            Logger::warn("send returned 0 before response was fully sent");
-            return false;
-        }
-
-        if (errno == EINTR) {
-            continue;
-        }
-
-        if (wouldBlock()) {
-            if (++wouldBlockRetries > maxWouldBlockRetries) {
-                Logger::warn("send would block, response was not fully sent");
-                return false;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-
-        Logger::error("send failed");
-        perror("send failed");
-        return false;
+std::string makeStaticFileResponseString(const StaticFileResult& file) {
+    if (file.status == StaticFileResult::Status::Ok) {
+        HttpResponse response(200, "OK");
+        response.setBody(file.body);
+        response.setContentType(file.contentType);
+        return response.toString();
     }
 
-    return true;
+    if (file.status == StaticFileResult::Status::BadRequest) {
+        return makeTextResponseString(400, "Bad Request", file.body);
+    }
+
+    if (file.status == StaticFileResult::Status::Forbidden) {
+        return makeTextResponseString(403, "Forbidden", file.body);
+    }
+
+    if (file.status == StaticFileResult::Status::NotFound) {
+        return makeTextResponseString(404, "Not Found", "Not Found");
+    }
+
+    return makeTextResponseString(500, "Internal Server Error", "Internal Server Error");
+}
+
+bool hasCompleteHeader(const std::string& buffer) {
+    return buffer.find("\r\n\r\n") != std::string::npos ||
+        buffer.find("\n\n") != std::string::npos;
 }
 }
+
+struct Server::Impl {
+    struct Connection {
+        UniqueFd fd;
+        unsigned long long id = 0;
+        std::string readBuffer;
+        std::string writeBuffer;
+        bool closeAfterWrite = true;
+        bool responsePending = false;
+    };
+
+    UniqueFd serverSocket;
+    UniqueFd completionEvent;
+    std::unordered_map<int, Connection> connections;
+    std::mutex completionsMutex;
+    std::deque<Completion> completions;
+    unsigned long long nextConnectionId = 1;
+};
 
 Server::Server(unsigned short port, std::size_t threadCount, std::string rootDirectory)
     : port_(port),
-      serverSocket_(-1),
       threadPool_(threadCount),
       rootDirectory_(std::move(rootDirectory)),
-      staticFileHandler_(rootDirectory_) {}
+      staticFileHandler_(rootDirectory_),
+      impl_(std::make_unique<Impl>()) {}
 
-Server::~Server() {
-    if (serverSocket_ != -1) {
-        close(serverSocket_);
-    }
-}
+Server::~Server() = default;
 
 bool Server::start() {
     if (!createSocket()) {
@@ -226,27 +198,47 @@ bool Server::start() {
         return false;
     }
 
+    if (!createEventFd()) {
+        return false;
+    }
+
     Logger::info("Web server started at http://localhost:" + std::to_string(port_));
     acceptLoop();
     return true;
 }
 
 bool Server::createSocket() {
-    serverSocket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverSocket_ == -1) {
+    UniqueFd socketFd(socket(AF_INET, SOCK_STREAM, 0));
+    if (!socketFd.valid()) {
         Logger::error("socket creation failed");
         perror("socket failed");
         return false;
     }
 
-    if (!setNonBlocking(serverSocket_)) {
+    const int reuseAddress = 1;
+    if (setsockopt(socketFd.get(), SOL_SOCKET, SO_REUSEADDR, &reuseAddress, sizeof(reuseAddress)) == -1) {
+        Logger::warn("failed to set SO_REUSEADDR");
+    }
+
+    if (!setNonBlocking(socketFd.get())) {
         Logger::error("failed to set server socket non-blocking");
         perror("fcntl failed");
-        close(serverSocket_);
-        serverSocket_ = -1;
         return false;
     }
 
+    impl_->serverSocket = std::move(socketFd);
+    return true;
+}
+
+bool Server::createEventFd() {
+    UniqueFd eventFd(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+    if (!eventFd.valid()) {
+        Logger::error("eventfd creation failed");
+        perror("eventfd failed");
+        return false;
+    }
+
+    impl_->completionEvent = std::move(eventFd);
     return true;
 }
 
@@ -257,7 +249,7 @@ bool Server::bindSocket() {
     serverAddress.sin_port = htons(port_);
 
     const int result = bind(
-        serverSocket_,
+        impl_->serverSocket.get(),
         reinterpret_cast<sockaddr*>(&serverAddress),
         sizeof(serverAddress));
     if (result == -1) {
@@ -270,7 +262,7 @@ bool Server::bindSocket() {
 }
 
 bool Server::listenSocket() {
-    const int result = listen(serverSocket_, SOMAXCONN);
+    const int result = listen(impl_->serverSocket.get(), SOMAXCONN);
     if (result == -1) {
         Logger::error("listen failed");
         perror("listen failed");
@@ -281,16 +273,21 @@ bool Server::listenSocket() {
 }
 
 void Server::acceptLoop() {
-    const int epollFd = epoll_create1(0);
-    if (epollFd == -1) {
+    UniqueFd epollFd(epoll_create1(EPOLL_CLOEXEC));
+    if (!epollFd.valid()) {
         Logger::error("epoll_create1 failed");
         perror("epoll_create1 failed");
         return;
     }
 
-    FileDescriptorGuard epollGuard(epollFd);
-    if (!addSocketToEpoll(epollFd, serverSocket_, EPOLLIN)) {
+    if (!addSocketToEpoll(epollFd.get(), impl_->serverSocket.get(), EPOLLIN)) {
         Logger::error("failed to add server socket to epoll");
+        perror("epoll_ctl failed");
+        return;
+    }
+
+    if (!addSocketToEpoll(epollFd.get(), impl_->completionEvent.get(), EPOLLIN)) {
+        Logger::error("failed to add completion event fd to epoll");
         perror("epoll_ctl failed");
         return;
     }
@@ -299,7 +296,7 @@ void Server::acceptLoop() {
     std::vector<epoll_event> events(maxEvents);
 
     while (true) {
-        const int eventCount = epoll_wait(epollFd, events.data(), static_cast<int>(events.size()), -1);
+        const int eventCount = epoll_wait(epollFd.get(), events.data(), static_cast<int>(events.size()), -1);
         if (eventCount == -1) {
             if (errno == EINTR) {
                 continue;
@@ -311,48 +308,30 @@ void Server::acceptLoop() {
         }
 
         for (int i = 0; i < eventCount; ++i) {
-            const int readySocket = events[i].data.fd;
+            const int readyFd = events[i].data.fd;
             const uint32_t readyEvents = events[i].events;
 
-            if (readySocket == serverSocket_) {
-                acceptReadyClients(epollFd);
+            if (readyFd == impl_->serverSocket.get()) {
+                if ((readyEvents & EPOLLIN) != 0) {
+                    acceptReadyClients(epollFd.get());
+                }
                 continue;
             }
 
-            if ((readyEvents & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {
-                Logger::info("client connection closed");
-                close(readySocket);
+            if (readyFd == impl_->completionEvent.get()) {
+                handleCompletionEvent(epollFd.get());
                 continue;
             }
 
-            if ((readyEvents & EPOLLIN) != 0) {
-                if (!removeSocketFromEpoll(epollFd, readySocket)) {
-                    Logger::error("failed to remove client socket from epoll before dispatch");
-                    perror("epoll_ctl failed");
-                    close(readySocket);
-                    continue;
-                }
-
-                try {
-                    threadPool_.enqueue([this, readySocket]() {
-                        handleClient(readySocket);
-                    });
-                } catch (const std::exception& exception) {
-                    Logger::error("failed to enqueue client task: " + std::string(exception.what()));
-                    close(readySocket);
-                } catch (...) {
-                    Logger::error("failed to enqueue client task");
-                    close(readySocket);
-                }
-            }
+            handleConnectionEvent(epollFd.get(), readyFd, readyEvents);
         }
     }
 }
 
 void Server::acceptReadyClients(int epollFd) {
     while (true) {
-        const int clientSocket = accept(serverSocket_, nullptr, nullptr);
-        if (clientSocket == -1) {
+        UniqueFd clientSocket(accept4(impl_->serverSocket.get(), nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC));
+        if (!clientSocket.valid()) {
             if (wouldBlock()) {
                 return;
             }
@@ -366,70 +345,287 @@ void Server::acceptReadyClients(int epollFd) {
             return;
         }
 
-        if (!setNonBlocking(clientSocket)) {
-            Logger::error("failed to set client socket non-blocking");
-            perror("fcntl failed");
-            close(clientSocket);
+        const int fd = clientSocket.get();
+        Impl::Connection connection;
+        connection.fd = std::move(clientSocket);
+        connection.id = impl_->nextConnectionId++;
+
+        const auto inserted = impl_->connections.emplace(fd, std::move(connection));
+        if (!inserted.second) {
+            Logger::error("failed to track accepted client socket");
             continue;
         }
 
-        if (!addSocketToEpoll(epollFd, clientSocket, EPOLLIN | EPOLLRDHUP)) {
+        if (!addSocketToEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
             Logger::error("failed to add client socket to epoll");
             perror("epoll_ctl failed");
-            close(clientSocket);
+            impl_->connections.erase(fd);
             continue;
         }
     }
 }
 
-void Server::handleClient(int clientSocket) {
-    ClientSocketGuard client(clientSocket);
-
-    std::string rawRequest;
-    HttpResponse response;
-    HttpRequest request;
-
-    try {
-        const HeaderReadStatus readStatus = readHttpHeader(client.get(), rawRequest);
-        if (readStatus == HeaderReadStatus::ClientClosed) {
-            Logger::info("client closed connection");
-            return;
-        }
-
-        if (readStatus == HeaderReadStatus::TooLarge) {
-            response = makeTextResponse(413, "Payload Too Large", "Payload Too Large");
-        } else if (readStatus == HeaderReadStatus::Incomplete) {
-            Logger::warn("incomplete request header received");
-            response = makeTextResponse(400, "Bad Request", "Bad Request");
-        } else if (readStatus == HeaderReadStatus::Error) {
-            return;
-        } else if (!HttpParser::parse(rawRequest, request)) {
-            // Invalid HTTP syntax maps to 400; unsupported methods are handled separately.
-            Logger::warn("bad request received");
-            response = makeTextResponse(400, "Bad Request", "Bad Request");
-        } else if (request.method != "GET") {
-            Logger::info("request path: " + request.path);
-            response = makeTextResponse(405, "Method Not Allowed", "Method Not Allowed");
-        } else {
-            Logger::info("request path: " + request.path);
-            const StaticFileResult file = staticFileHandler_.handle(request.path);
-            if (file.status == StaticFileResult::Status::Ok) {
-                response = makeTextResponse(200, "OK", file.body);
-                response.setContentType(file.contentType);
-            } else if (file.status == StaticFileResult::Status::BadRequest) {
-                response = makeTextResponse(400, "Bad Request", file.body);
-            } else if (file.status == StaticFileResult::Status::NotFound) {
-                response = makeTextResponse(404, "Not Found", "Not Found");
-            } else {
-                response = makeTextResponse(500, "Internal Server Error", "Internal Server Error");
-            }
-        }
-    } catch (const std::exception&) {
-        Logger::error("internal server error while handling request");
-        response = makeTextResponse(500, "Internal Server Error", "Internal Server Error");
+void Server::handleConnectionEvent(int epollFd, int fd, unsigned int events) {
+    if ((events & (EPOLLERR | EPOLLHUP)) != 0) {
+        Logger::info("client connection closed");
+        closeConnection(epollFd, fd);
+        return;
     }
 
-    Logger::info("response status: " + std::to_string(response.statusCode()));
-    const std::string rawResponse = response.toString();
-    sendAll(client.get(), rawResponse);
+    if ((events & EPOLLRDHUP) != 0) {
+        const auto connection = impl_->connections.find(fd);
+        if (connection == impl_->connections.end() ||
+            (connection->second.writeBuffer.empty() && !connection->second.responsePending)) {
+            Logger::info("client read side closed");
+            closeConnection(epollFd, fd);
+            return;
+        }
+    }
+
+    if ((events & EPOLLIN) != 0) {
+        readFromConnection(epollFd, fd);
+    }
+
+    if ((events & EPOLLOUT) != 0) {
+        writeToConnection(epollFd, fd);
+    }
+}
+
+void Server::handleCompletionEvent(int epollFd) {
+    while (true) {
+        uint64_t value = 0;
+        const ssize_t result = read(impl_->completionEvent.get(), &value, sizeof(value));
+        if (result == sizeof(value)) {
+            continue;
+        }
+
+        if (result == -1 && errno == EINTR) {
+            continue;
+        }
+
+        if (result == -1 && wouldBlock()) {
+            break;
+        }
+
+        if (result == -1) {
+            Logger::error("failed to read completion event fd");
+            perror("eventfd read failed");
+        }
+        break;
+    }
+
+    std::deque<Completion> completions;
+    {
+        std::lock_guard<std::mutex> lock(impl_->completionsMutex);
+        completions.swap(impl_->completions);
+    }
+
+    for (Completion& completion : completions) {
+        const auto connection = impl_->connections.find(completion.fd);
+        if (connection == impl_->connections.end() ||
+            connection->second.id != completion.connectionId) {
+            continue;
+        }
+
+        connection->second.responsePending = false;
+        connection->second.writeBuffer = std::move(completion.response);
+        connection->second.closeAfterWrite = true;
+
+        if (!modifySocketInEpoll(epollFd, completion.fd, EPOLLOUT | EPOLLRDHUP)) {
+            Logger::error("failed to register client socket for write");
+            perror("epoll_ctl failed");
+            closeConnection(epollFd, completion.fd);
+        }
+    }
+}
+
+void Server::readFromConnection(int epollFd, int fd) {
+    const auto connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end() || connection->second.responsePending) {
+        return;
+    }
+
+    char buffer[4096]{};
+    while (true) {
+        const ssize_t bytesRead = recv(fd, buffer, sizeof(buffer), 0);
+        if (bytesRead > 0) {
+            connection->second.readBuffer.append(buffer, static_cast<std::size_t>(bytesRead));
+            if (connection->second.readBuffer.size() > maxRequestHeaderSize) {
+                connection->second.writeBuffer =
+                    makeTextResponseString(413, "Payload Too Large", "Payload Too Large");
+                connection->second.closeAfterWrite = true;
+                if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                    closeConnection(epollFd, fd);
+                }
+                return;
+            }
+
+            if (hasCompleteHeader(connection->second.readBuffer)) {
+                processReadBuffer(epollFd, fd);
+                return;
+            }
+
+            continue;
+        }
+
+        if (bytesRead == 0) {
+            closeConnection(epollFd, fd);
+            return;
+        }
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        if (wouldBlock()) {
+            return;
+        }
+
+        Logger::error("recv failed");
+        perror("recv failed");
+        closeConnection(epollFd, fd);
+        return;
+    }
+}
+
+void Server::writeToConnection(int epollFd, int fd) {
+    const auto connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end()) {
+        return;
+    }
+
+    std::string& writeBuffer = connection->second.writeBuffer;
+    while (!writeBuffer.empty()) {
+        const ssize_t bytesSent = send(fd, writeBuffer.data(), writeBuffer.size(), 0);
+        if (bytesSent > 0) {
+            writeBuffer.erase(0, static_cast<std::size_t>(bytesSent));
+            continue;
+        }
+
+        if (bytesSent == 0) {
+            return;
+        }
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        if (wouldBlock()) {
+            return;
+        }
+
+        Logger::error("send failed");
+        perror("send failed");
+        closeConnection(epollFd, fd);
+        return;
+    }
+
+    if (connection->second.closeAfterWrite) {
+        closeConnection(epollFd, fd);
+        return;
+    }
+
+    if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+        Logger::error("failed to register client socket for read");
+        perror("epoll_ctl failed");
+        closeConnection(epollFd, fd);
+    }
+}
+
+void Server::processReadBuffer(int epollFd, int fd) {
+    const auto connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end()) {
+        return;
+    }
+
+    HttpRequest request;
+    if (!HttpParser::parse(connection->second.readBuffer, request)) {
+        Logger::warn("bad request received");
+        connection->second.writeBuffer = makeTextResponseString(400, "Bad Request", "Bad Request");
+        connection->second.closeAfterWrite = true;
+        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+            closeConnection(epollFd, fd);
+        }
+        return;
+    }
+
+    if (request.method != "GET") {
+        Logger::info("request path: " + request.path);
+        connection->second.writeBuffer =
+            makeTextResponseString(405, "Method Not Allowed", "Method Not Allowed");
+        connection->second.closeAfterWrite = true;
+        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+            closeConnection(epollFd, fd);
+        }
+        return;
+    }
+
+    Logger::info("request path: " + request.path);
+    connection->second.responsePending = true;
+    const unsigned long long connectionId = connection->second.id;
+
+    if (!modifySocketInEpoll(epollFd, fd, EPOLLRDHUP)) {
+        closeConnection(epollFd, fd);
+        return;
+    }
+
+    const bool enqueued = threadPool_.enqueue([this, fd, connectionId, request]() {
+        queueResponse(fd, connectionId, buildResponse(request));
+    });
+
+    if (!enqueued) {
+        connection->second.responsePending = false;
+        connection->second.writeBuffer =
+            makeTextResponseString(503, "Service Unavailable", "Service Unavailable");
+        connection->second.closeAfterWrite = true;
+        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+            closeConnection(epollFd, fd);
+        }
+    }
+}
+
+void Server::queueResponse(int fd, unsigned long long connectionId, std::string response) {
+    {
+        std::lock_guard<std::mutex> lock(impl_->completionsMutex);
+        impl_->completions.push_back({fd, connectionId, std::move(response)});
+    }
+
+    notifyCompletionEvent();
+}
+
+void Server::closeConnection(int epollFd, int fd) {
+    removeSocketFromEpoll(epollFd, fd);
+    impl_->connections.erase(fd);
+}
+
+std::string Server::buildResponse(const HttpRequest& request) const {
+    try {
+        const StaticFileResult file = staticFileHandler_.handle(request.path);
+        return makeStaticFileResponseString(file);
+    } catch (const std::exception&) {
+        Logger::error("internal server error while handling request");
+        return makeTextResponseString(500, "Internal Server Error", "Internal Server Error");
+    }
+}
+
+void Server::notifyCompletionEvent() {
+    uint64_t value = 1;
+    while (true) {
+        const ssize_t result = write(impl_->completionEvent.get(), &value, sizeof(value));
+        if (result == sizeof(value)) {
+            return;
+        }
+
+        if (result == -1 && errno == EINTR) {
+            continue;
+        }
+
+        if (result == -1 && wouldBlock()) {
+            return;
+        }
+
+        Logger::error("failed to notify completion event fd");
+        perror("eventfd write failed");
+        return;
+    }
 }
