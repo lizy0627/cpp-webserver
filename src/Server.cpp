@@ -7,6 +7,7 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -26,6 +27,8 @@
 namespace {
 constexpr std::size_t maxRequestHeaderSize = 8192;
 constexpr int invalidFd = -1;
+constexpr int idleScanIntervalMs = 1000;
+constexpr std::chrono::seconds defaultConnectionIdleTimeout(30);
 
 class UniqueFd {
 public:
@@ -80,6 +83,7 @@ struct Completion {
     int fd = invalidFd;
     unsigned long long connectionId = 0;
     std::string response;
+    bool closeAfterWrite = true;
 };
 
 bool wouldBlock() {
@@ -117,44 +121,72 @@ void removeSocketFromEpoll(int epollFd, int fd) {
 
 HttpResponse makeTextResponse(int statusCode,
                               const std::string& statusText,
-                              const std::string& body) {
+                              const std::string& body,
+                              bool keepAlive = false) {
     HttpResponse response(statusCode, statusText);
     response.setBody(body);
+    response.setKeepAlive(keepAlive);
     return response;
 }
 
 std::string makeTextResponseString(int statusCode,
                                    const std::string& statusText,
-                                   const std::string& body) {
-    return makeTextResponse(statusCode, statusText, body).toString();
+                                   const std::string& body,
+                                   bool keepAlive = false,
+                                   bool includeBody = true) {
+    return makeTextResponse(statusCode, statusText, body, keepAlive).toString(includeBody);
 }
 
-std::string makeStaticFileResponseString(const StaticFileResult& file) {
+std::string makeStaticFileResponseString(const StaticFileResult& file, bool keepAlive, bool includeBody) {
     if (file.status == StaticFileResult::Status::Ok) {
         HttpResponse response(200, "OK");
         response.setBody(file.body);
         response.setContentType(file.contentType);
-        return response.toString();
+        response.setKeepAlive(keepAlive);
+        return response.toString(includeBody);
     }
 
     if (file.status == StaticFileResult::Status::BadRequest) {
-        return makeTextResponseString(400, "Bad Request", file.body);
+        return makeTextResponseString(400, "Bad Request", file.body, keepAlive, includeBody);
     }
 
     if (file.status == StaticFileResult::Status::Forbidden) {
-        return makeTextResponseString(403, "Forbidden", file.body);
+        return makeTextResponseString(403, "Forbidden", file.body, keepAlive, includeBody);
     }
 
     if (file.status == StaticFileResult::Status::NotFound) {
-        return makeTextResponseString(404, "Not Found", "Not Found");
+        return makeTextResponseString(404, "Not Found", "Not Found", keepAlive, includeBody);
     }
 
-    return makeTextResponseString(500, "Internal Server Error", "Internal Server Error");
+    return makeTextResponseString(500, "Internal Server Error", "Internal Server Error", keepAlive, includeBody);
+}
+
+std::size_t completeHeaderLength(const std::string& buffer) {
+    const std::size_t crlfHeaderEnd = buffer.find("\r\n\r\n");
+    const std::size_t lfHeaderEnd = buffer.find("\n\n");
+
+    if (crlfHeaderEnd == std::string::npos) {
+        return lfHeaderEnd == std::string::npos ? std::string::npos : lfHeaderEnd + 2;
+    }
+
+    if (lfHeaderEnd == std::string::npos || crlfHeaderEnd < lfHeaderEnd) {
+        return crlfHeaderEnd + 4;
+    }
+
+    return lfHeaderEnd + 2;
 }
 
 bool hasCompleteHeader(const std::string& buffer) {
-    return buffer.find("\r\n\r\n") != std::string::npos ||
-        buffer.find("\n\n") != std::string::npos;
+    return completeHeaderLength(buffer) != std::string::npos;
+}
+
+bool currentRequestHeaderTooLarge(const std::string& buffer) {
+    const std::size_t headerLength = completeHeaderLength(buffer);
+    if (headerLength != std::string::npos) {
+        return headerLength > maxRequestHeaderSize;
+    }
+
+    return buffer.size() > maxRequestHeaderSize;
 }
 }
 
@@ -166,6 +198,7 @@ struct Server::Impl {
         std::string writeBuffer;
         bool closeAfterWrite = true;
         bool responsePending = false;
+        std::chrono::steady_clock::time_point lastActiveTime = std::chrono::steady_clock::now();
     };
 
     UniqueFd serverSocket;
@@ -176,11 +209,18 @@ struct Server::Impl {
     unsigned long long nextConnectionId = 1;
 };
 
-Server::Server(unsigned short port, std::size_t threadCount, std::string rootDirectory)
+Server::Server(
+    unsigned short port,
+    std::size_t threadCount,
+    std::string rootDirectory,
+    std::chrono::seconds connectionIdleTimeout)
     : port_(port),
       threadPool_(threadCount),
       rootDirectory_(std::move(rootDirectory)),
       staticFileHandler_(rootDirectory_),
+      connectionIdleTimeout_(connectionIdleTimeout > std::chrono::seconds::zero()
+          ? connectionIdleTimeout
+          : defaultConnectionIdleTimeout),
       impl_(std::make_unique<Impl>()) {}
 
 Server::~Server() = default;
@@ -294,9 +334,14 @@ void Server::acceptLoop() {
 
     constexpr int maxEvents = 64;
     std::vector<epoll_event> events(maxEvents);
+    auto lastIdleScanTime = std::chrono::steady_clock::now();
 
     while (true) {
-        const int eventCount = epoll_wait(epollFd.get(), events.data(), static_cast<int>(events.size()), -1);
+        const int eventCount = epoll_wait(
+            epollFd.get(),
+            events.data(),
+            static_cast<int>(events.size()),
+            idleScanIntervalMs);
         if (eventCount == -1) {
             if (errno == EINTR) {
                 continue;
@@ -325,6 +370,12 @@ void Server::acceptLoop() {
 
             handleConnectionEvent(epollFd.get(), readyFd, readyEvents);
         }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastIdleScanTime >= std::chrono::milliseconds(idleScanIntervalMs)) {
+            closeIdleConnections(epollFd.get(), now);
+            lastIdleScanTime = now;
+        }
     }
 }
 
@@ -349,6 +400,7 @@ void Server::acceptReadyClients(int epollFd) {
         Impl::Connection connection;
         connection.fd = std::move(clientSocket);
         connection.id = impl_->nextConnectionId++;
+        connection.lastActiveTime = std::chrono::steady_clock::now();
 
         const auto inserted = impl_->connections.emplace(fd, std::move(connection));
         if (!inserted.second) {
@@ -429,7 +481,7 @@ void Server::handleCompletionEvent(int epollFd) {
 
         connection->second.responsePending = false;
         connection->second.writeBuffer = std::move(completion.response);
-        connection->second.closeAfterWrite = true;
+        connection->second.closeAfterWrite = completion.closeAfterWrite;
 
         if (!modifySocketInEpoll(epollFd, completion.fd, EPOLLOUT | EPOLLRDHUP)) {
             Logger::error("failed to register client socket for write");
@@ -449,8 +501,9 @@ void Server::readFromConnection(int epollFd, int fd) {
     while (true) {
         const ssize_t bytesRead = recv(fd, buffer, sizeof(buffer), 0);
         if (bytesRead > 0) {
+            connection->second.lastActiveTime = std::chrono::steady_clock::now();
             connection->second.readBuffer.append(buffer, static_cast<std::size_t>(bytesRead));
-            if (connection->second.readBuffer.size() > maxRequestHeaderSize) {
+            if (currentRequestHeaderTooLarge(connection->second.readBuffer)) {
                 connection->second.writeBuffer =
                     makeTextResponseString(413, "Payload Too Large", "Payload Too Large");
                 connection->second.closeAfterWrite = true;
@@ -498,6 +551,7 @@ void Server::writeToConnection(int epollFd, int fd) {
     while (!writeBuffer.empty()) {
         const ssize_t bytesSent = send(fd, writeBuffer.data(), writeBuffer.size(), 0);
         if (bytesSent > 0) {
+            connection->second.lastActiveTime = std::chrono::steady_clock::now();
             writeBuffer.erase(0, static_cast<std::size_t>(bytesSent));
             continue;
         }
@@ -525,6 +579,11 @@ void Server::writeToConnection(int epollFd, int fd) {
         return;
     }
 
+    if (hasCompleteHeader(connection->second.readBuffer)) {
+        processReadBuffer(epollFd, fd);
+        return;
+    }
+
     if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
         Logger::error("failed to register client socket for read");
         perror("epoll_ctl failed");
@@ -538,8 +597,14 @@ void Server::processReadBuffer(int epollFd, int fd) {
         return;
     }
 
+    const std::size_t requestLength = completeHeaderLength(connection->second.readBuffer);
+    if (requestLength == std::string::npos) {
+        return;
+    }
+
+    const std::string rawRequest = connection->second.readBuffer.substr(0, requestLength);
     HttpRequest request;
-    if (!HttpParser::parse(connection->second.readBuffer, request)) {
+    if (!HttpParser::parse(rawRequest, request)) {
         Logger::warn("bad request received");
         connection->second.writeBuffer = makeTextResponseString(400, "Bad Request", "Bad Request");
         connection->second.closeAfterWrite = true;
@@ -549,11 +614,15 @@ void Server::processReadBuffer(int epollFd, int fd) {
         return;
     }
 
-    if (request.method != "GET") {
+    connection->second.lastActiveTime = std::chrono::steady_clock::now();
+    connection->second.readBuffer.erase(0, requestLength);
+    const bool closeAfterWrite = !request.keepAlive;
+
+    if (request.method != "GET" && request.method != "HEAD") {
         Logger::info("request path: " + request.path);
         connection->second.writeBuffer =
-            makeTextResponseString(405, "Method Not Allowed", "Method Not Allowed");
-        connection->second.closeAfterWrite = true;
+            makeTextResponseString(405, "Method Not Allowed", "Method Not Allowed", request.keepAlive);
+        connection->second.closeAfterWrite = closeAfterWrite;
         if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
             closeConnection(epollFd, fd);
         }
@@ -570,7 +639,7 @@ void Server::processReadBuffer(int epollFd, int fd) {
     }
 
     const bool enqueued = threadPool_.enqueue([this, fd, connectionId, request]() {
-        queueResponse(fd, connectionId, buildResponse(request));
+        queueResponse(fd, connectionId, buildResponse(request), !request.keepAlive);
     });
 
     if (!enqueued) {
@@ -584,13 +653,35 @@ void Server::processReadBuffer(int epollFd, int fd) {
     }
 }
 
-void Server::queueResponse(int fd, unsigned long long connectionId, std::string response) {
+void Server::queueResponse(
+    int fd,
+    unsigned long long connectionId,
+    std::string response,
+    bool closeAfterWrite) {
     {
         std::lock_guard<std::mutex> lock(impl_->completionsMutex);
-        impl_->completions.push_back({fd, connectionId, std::move(response)});
+        impl_->completions.push_back({fd, connectionId, std::move(response), closeAfterWrite});
     }
 
     notifyCompletionEvent();
+}
+
+void Server::closeIdleConnections(int epollFd, std::chrono::steady_clock::time_point now) {
+    std::vector<int> timedOutFds;
+    for (const auto& connection : impl_->connections) {
+        if (connection.second.responsePending) {
+            continue;
+        }
+
+        if (now - connection.second.lastActiveTime >= connectionIdleTimeout_) {
+            timedOutFds.push_back(connection.first);
+        }
+    }
+
+    for (int fd : timedOutFds) {
+        Logger::info("client connection timed out");
+        closeConnection(epollFd, fd);
+    }
 }
 
 void Server::closeConnection(int epollFd, int fd) {
@@ -601,10 +692,15 @@ void Server::closeConnection(int epollFd, int fd) {
 std::string Server::buildResponse(const HttpRequest& request) const {
     try {
         const StaticFileResult file = staticFileHandler_.handle(request.path);
-        return makeStaticFileResponseString(file);
+        return makeStaticFileResponseString(file, request.keepAlive, request.method != "HEAD");
     } catch (const std::exception&) {
         Logger::error("internal server error while handling request");
-        return makeTextResponseString(500, "Internal Server Error", "Internal Server Error");
+        return makeTextResponseString(
+            500,
+            "Internal Server Error",
+            "Internal Server Error",
+            request.keepAlive,
+            request.method != "HEAD");
     }
 }
 

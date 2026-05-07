@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -11,7 +12,11 @@ class HttpRequest;
 
 class Server {
 public:
-    Server(unsigned short port, std::size_t threadCount, std::string rootDirectory);
+    Server(
+        unsigned short port,
+        std::size_t threadCount,
+        std::string rootDirectory,
+        std::chrono::seconds connectionIdleTimeout = std::chrono::seconds(30));
     ~Server();
 
     Server(const Server&) = delete;
@@ -33,7 +38,8 @@ private:
     void readFromConnection(int epollFd, int fd);
     void writeToConnection(int epollFd, int fd);
     void processReadBuffer(int epollFd, int fd);
-    void queueResponse(int fd, unsigned long long connectionId, std::string response);
+    void queueResponse(int fd, unsigned long long connectionId, std::string response, bool closeAfterWrite);
+    void closeIdleConnections(int epollFd, std::chrono::steady_clock::time_point now);
     void closeConnection(int epollFd, int fd);
     std::string buildResponse(const HttpRequest& request) const;
     void notifyCompletionEvent();
@@ -42,5 +48,6 @@ private:
     ThreadPool threadPool_;
     std::string rootDirectory_;
     StaticFileHandler staticFileHandler_;
+    std::chrono::seconds connectionIdleTimeout_;
     std::unique_ptr<Impl> impl_;
 };

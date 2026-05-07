@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 
@@ -10,6 +11,7 @@ public:
     unsigned short port() const;
     std::size_t threadNum() const;
     const std::string& root() const;
+    std::chrono::seconds connectionIdleTimeout() const;
 
 private:
     void load(const std::string& filePath);
@@ -18,4 +20,5 @@ private:
     unsigned short port_;
     std::size_t threadNum_;
     std::string root_;
+    std::chrono::seconds connectionIdleTimeout_;
 };

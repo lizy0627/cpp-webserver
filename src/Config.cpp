@@ -10,6 +10,7 @@
 namespace {
 constexpr unsigned short defaultPort = 8080;
 constexpr std::size_t defaultThreadNum = 4;
+constexpr unsigned long long defaultConnectionIdleTimeoutSeconds = 30;
 const char* defaultRoot = "www";
 
 std::string trim(const std::string& value) {
@@ -50,6 +51,10 @@ const std::string& Config::root() const {
     return root_;
 }
 
+std::chrono::seconds Config::connectionIdleTimeout() const {
+    return connectionIdleTimeout_;
+}
+
 void Config::load(const std::string& filePath) {
     std::ifstream file(filePath);
     if (!file) {
@@ -60,6 +65,7 @@ void Config::load(const std::string& filePath) {
     unsigned short parsedPort = defaultPort;
     std::size_t parsedThreadNum = defaultThreadNum;
     std::string parsedRoot = defaultRoot;
+    std::chrono::seconds parsedConnectionIdleTimeout(defaultConnectionIdleTimeoutSeconds);
 
     std::string line;
     std::size_t lineNumber = 0;
@@ -111,6 +117,15 @@ void Config::load(const std::string& filePath) {
             }
 
             parsedRoot = value;
+        } else if (key == "connection_idle_timeout_seconds") {
+            unsigned long long number = 0;
+            if (!parseUnsigned(value, number) || number == 0) {
+                Logger::warn("invalid config value for connection_idle_timeout_seconds, using defaults");
+                resetToDefaults();
+                return;
+            }
+
+            parsedConnectionIdleTimeout = std::chrono::seconds(number);
         } else {
             Logger::warn("unknown config key '" + key + "', using defaults");
             resetToDefaults();
@@ -121,10 +136,12 @@ void Config::load(const std::string& filePath) {
     port_ = parsedPort;
     threadNum_ = parsedThreadNum;
     root_ = parsedRoot;
+    connectionIdleTimeout_ = parsedConnectionIdleTimeout;
 }
 
 void Config::resetToDefaults() {
     port_ = defaultPort;
     threadNum_ = defaultThreadNum;
     root_ = defaultRoot;
+    connectionIdleTimeout_ = std::chrono::seconds(defaultConnectionIdleTimeoutSeconds);
 }

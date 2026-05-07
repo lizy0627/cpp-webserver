@@ -6,11 +6,16 @@
 
 struct Server::Impl {};
 
-Server::Server(unsigned short port, std::size_t threadCount, std::string rootDirectory)
+Server::Server(
+    unsigned short port,
+    std::size_t threadCount,
+    std::string rootDirectory,
+    std::chrono::seconds connectionIdleTimeout)
     : port_(port),
       threadPool_(threadCount),
       rootDirectory_(std::move(rootDirectory)),
       staticFileHandler_(rootDirectory_),
+      connectionIdleTimeout_(connectionIdleTimeout),
       impl_(nullptr) {}
 
 Server::~Server() = default;

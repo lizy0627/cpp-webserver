@@ -1,6 +1,7 @@
 #include "HttpParser.h"
 
 #include <cctype>
+#include <map>
 #include <sstream>
 
 namespace {
@@ -107,6 +108,58 @@ std::string toLower(std::string value) {
 
     return value;
 }
+
+std::string trimLinearWhitespace(const std::string& value) {
+    const std::size_t first = value.find_first_not_of(" \t");
+    if (first == std::string::npos) {
+        return "";
+    }
+
+    const std::size_t last = value.find_last_not_of(" \t");
+    return value.substr(first, last - first + 1);
+}
+
+bool hasConnectionToken(const std::map<std::string, std::string>& headers, const std::string& token) {
+    const auto connection = headers.find("connection");
+    if (connection == headers.end()) {
+        return false;
+    }
+
+    std::size_t tokenStart = 0;
+    while (tokenStart <= connection->second.size()) {
+        const std::size_t tokenEnd = connection->second.find(',', tokenStart);
+        const std::string currentToken = trimLinearWhitespace(connection->second.substr(
+            tokenStart,
+            tokenEnd == std::string::npos ? std::string::npos : tokenEnd - tokenStart));
+
+        if (toLower(currentToken) == token) {
+            return true;
+        }
+
+        if (tokenEnd == std::string::npos) {
+            break;
+        }
+
+        tokenStart = tokenEnd + 1;
+    }
+
+    return false;
+}
+
+bool shouldKeepAlive(const std::string& version, const std::map<std::string, std::string>& headers) {
+    const bool requestedClose = hasConnectionToken(headers, "close");
+    const bool requestedKeepAlive = hasConnectionToken(headers, "keep-alive");
+
+    if (requestedClose) {
+        return false;
+    }
+
+    if (version == "HTTP/1.1") {
+        return true;
+    }
+
+    return requestedKeepAlive;
+}
 }
 
 bool HttpParser::parse(const std::string& rawRequest, HttpRequest& request) {
@@ -185,9 +238,17 @@ bool HttpParser::parse(const std::string& rawRequest, HttpRequest& request) {
             return false;
         }
 
-        parsedRequest.headers[toLower(name)] = trim(line.substr(separator + 1));
+        const std::string lowerName = toLower(name);
+        const std::string value = trim(line.substr(separator + 1));
+        auto existingHeader = parsedRequest.headers.find(lowerName);
+        if (existingHeader == parsedRequest.headers.end()) {
+            parsedRequest.headers[lowerName] = value;
+        } else {
+            existingHeader->second += ", " + value;
+        }
     }
 
+    parsedRequest.keepAlive = shouldKeepAlive(parsedRequest.version, parsedRequest.headers);
     request = parsedRequest;
     return true;
 }

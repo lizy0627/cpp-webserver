@@ -1,3 +1,4 @@
+#include "Config.h"
 #include "HttpParser.h"
 #include "HttpResponse.h"
 #include "StaticFileHandler.h"
@@ -25,6 +26,32 @@ void expect(bool condition, const char* message) {
 void expectParseFailure(const std::string& rawRequest, const char* message) {
     HttpRequest request;
     expect(!HttpParser::parse(rawRequest, request), message);
+}
+
+void expectResponseConnectionHeader(bool keepAlive, const std::string& expectedHeader, const char* message) {
+    HttpResponse response(200, "OK");
+    response.setKeepAlive(keepAlive);
+
+    const std::string raw = response.toString();
+    expect(raw.find(expectedHeader) != std::string::npos, message);
+}
+
+std::string responseHeaders(const std::string& rawResponse) {
+    const std::size_t separator = rawResponse.find("\r\n\r\n");
+    if (separator == std::string::npos) {
+        throw std::runtime_error("response header separator not found");
+    }
+
+    return rawResponse.substr(0, separator + 4);
+}
+
+std::string responseBody(const std::string& rawResponse) {
+    const std::size_t separator = rawResponse.find("\r\n\r\n");
+    if (separator == std::string::npos) {
+        throw std::runtime_error("response header separator not found");
+    }
+
+    return rawResponse.substr(separator + 4);
 }
 
 void writeFile(const std::filesystem::path& path, const std::string& body) {
@@ -75,6 +102,72 @@ void testHttpParserParsesGetRootHttp11() {
     expect(request.path == "/", "path should be /");
     expect(request.version == "HTTP/1.1", "version should be HTTP/1.1");
     expect(request.headers["host"] == "localhost", "Host header should parse");
+    expect(request.keepAlive, "HTTP/1.1 should keep alive by default");
+    expectResponseConnectionHeader(
+        request.keepAlive,
+        "Connection: keep-alive\r\n",
+        "HTTP/1.1 default response should keep alive");
+}
+
+void testHttpParserHttp11ConnectionCloseDisablesKeepAlive() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "GET / HTTP/1.1\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "HTTP/1.1 Connection: close request should parse");
+    expect(!request.keepAlive, "HTTP/1.1 Connection: close should disable keep-alive");
+    expectResponseConnectionHeader(
+        request.keepAlive,
+        "Connection: close\r\n",
+        "HTTP/1.1 Connection: close response should close");
+}
+
+void testHttpParserHttp10ClosesByDefault() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "GET / HTTP/1.0\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "HTTP/1.0 request should parse");
+    expect(!request.keepAlive, "HTTP/1.0 should close by default");
+    expectResponseConnectionHeader(
+        request.keepAlive,
+        "Connection: close\r\n",
+        "HTTP/1.0 default response should close");
+}
+
+void testHttpParserHttp10ConnectionKeepAliveEnablesKeepAlive() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "GET / HTTP/1.0\r\n"
+        "Connection: keep-alive\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "HTTP/1.0 Connection: keep-alive request should parse");
+    expect(request.keepAlive, "HTTP/1.0 Connection: keep-alive should enable keep-alive");
+    expectResponseConnectionHeader(
+        request.keepAlive,
+        "Connection: keep-alive\r\n",
+        "HTTP/1.0 Connection: keep-alive response should keep alive");
+}
+
+void testHttpParserParsesHeadRequest() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "HEAD /index.html HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "HEAD request should parse");
+    expect(request.method == "HEAD", "method should be HEAD");
+    expect(request.path == "/index.html", "HEAD path should parse");
+    expect(request.keepAlive, "HEAD HTTP/1.1 should keep alive by default");
 }
 
 void testHttpParserRejectsUnsupportedHttpVersion() {
@@ -167,9 +260,35 @@ void testHttpResponseSerializesStatusHeadersAndBody() {
         raw.find("Content-Type: text/plain; charset=utf-8\r\n") != std::string::npos,
         "content type should serialize");
     expect(raw.find("Content-Length: 5\r\n") != std::string::npos, "content length should serialize");
+    expect(raw.find("Connection: close\r\n") != std::string::npos, "connection close should serialize by default");
     expect(
         raw.rfind("\r\n\r\nhello") == raw.size() - std::string("\r\n\r\nhello").size(),
         "body should serialize after header separator");
+}
+
+void testHttpResponseSerializesKeepAliveConnectionHeader() {
+    HttpResponse response(200, "OK");
+    response.setKeepAlive(true);
+    response.setBody("hello");
+
+    const std::string raw = response.toString();
+    expect(
+        raw.find("Connection: keep-alive\r\n") != std::string::npos,
+        "keep-alive connection header should serialize");
+}
+
+void testHttpResponseCanSerializeHeadersWithoutBody() {
+    HttpResponse response(200, "OK");
+    response.setContentType("text/plain; charset=utf-8");
+    response.setBody("hello");
+
+    const std::string getRaw = response.toString();
+    const std::string headRaw = response.toString(false);
+
+    expect(responseHeaders(headRaw) == responseHeaders(getRaw), "HEAD headers should match GET headers");
+    expect(headRaw.find("Content-Length: 5\r\n") != std::string::npos, "HEAD should keep GET content length");
+    expect(responseBody(headRaw).empty(), "HEAD response should not serialize body");
+    expect(responseBody(getRaw) == "hello", "GET response body should still serialize");
 }
 
 void testStaticFileHandlerServesIndexForRoot() {
@@ -237,6 +356,70 @@ void testStaticFileHandlerMimeTypes() {
         expect(result.status == StaticFileResult::Status::Ok, "MIME fixture should be served");
         expect(result.contentType == mimeCase.second, "MIME type should match extension");
     }
+}
+
+void testHeadStaticFileSuccessUsesGetHeadersWithoutBody() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "index.html", "hello");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult file = handler.handle("/index.html");
+    expect(file.status == StaticFileResult::Status::Ok, "HEAD target should be found through static handler");
+
+    HttpResponse response(200, "OK");
+    response.setBody(file.body);
+    response.setContentType(file.contentType);
+
+    const std::string getRaw = response.toString();
+    const std::string headRaw = response.toString(false);
+
+    expect(headRaw.find("HTTP/1.1 200 OK\r\n") == 0, "HEAD static file should return 200");
+    expect(responseHeaders(headRaw) == responseHeaders(getRaw), "HEAD static headers should match GET headers");
+    expect(responseBody(headRaw).empty(), "HEAD static file response should not include body");
+    expect(responseBody(getRaw) == "hello", "GET static file response should include body");
+}
+
+void testHeadStaticFileNotFoundHasHeadersWithoutBody() {
+    StaticFileHandler handler(WEBSERVER_TEST_WWW_DIR);
+    const StaticFileResult missing = handler.handle("/missing-file.txt");
+    expect(missing.status == StaticFileResult::Status::NotFound, "HEAD missing target should return not found");
+
+    HttpResponse response(404, "Not Found");
+    response.setBody("Not Found");
+
+    const std::string headRaw = response.toString(false);
+    expect(headRaw.find("HTTP/1.1 404 Not Found\r\n") == 0, "HEAD missing file should return 404");
+    expect(headRaw.find("Content-Length: 9\r\n") != std::string::npos, "HEAD 404 should keep error body length");
+    expect(responseBody(headRaw).empty(), "HEAD 404 response should not include body");
+}
+
+void testConfigParsesConnectionIdleTimeout() {
+    TemporaryDirectory root;
+    const std::filesystem::path configPath = root.path() / "server.conf";
+    writeFile(
+        configPath,
+        "port=9090\n"
+        "thread_num=2\n"
+        "root=www\n"
+        "connection_idle_timeout_seconds=5\n");
+
+    Config config(configPath.string());
+
+    expect(config.port() == 9090, "config should parse port");
+    expect(config.threadNum() == 2, "config should parse thread count");
+    expect(config.root() == "www", "config should parse root");
+    expect(
+        config.connectionIdleTimeout() == std::chrono::seconds(5),
+        "config should parse connection idle timeout");
+}
+
+void testConfigDefaultsConnectionIdleTimeout() {
+    TemporaryDirectory root;
+    Config config((root.path() / "missing.conf").string());
+
+    expect(
+        config.connectionIdleTimeout() == std::chrono::seconds(30),
+        "missing config should use default connection idle timeout");
 }
 
 void testThreadPoolExecutesTask() {
@@ -311,6 +494,10 @@ void testThreadPoolDestructorJoinsWorkers() {
 int main() {
     try {
         testHttpParserParsesGetRootHttp11();
+        testHttpParserHttp11ConnectionCloseDisablesKeepAlive();
+        testHttpParserHttp10ClosesByDefault();
+        testHttpParserHttp10ConnectionKeepAliveEnablesKeepAlive();
+        testHttpParserParsesHeadRequest();
         testHttpParserRejectsUnsupportedHttpVersion();
         testHttpParserRejectsPathWithoutLeadingSlash();
         testHttpParserRejectsInvalidHeader();
@@ -319,10 +506,16 @@ int main() {
         testHttpParserStoresHeaderNamesCaseInsensitively();
         testHttpParserRejectsOverlongRequestLineAndHeaders();
         testHttpResponseSerializesStatusHeadersAndBody();
+        testHttpResponseSerializesKeepAliveConnectionHeader();
+        testHttpResponseCanSerializeHeadersWithoutBody();
         testStaticFileHandlerServesIndexForRoot();
         testStaticFileHandlerReturnsNotFoundForMissingFile();
         testStaticFileHandlerRejectsTraversalPaths();
         testStaticFileHandlerMimeTypes();
+        testHeadStaticFileSuccessUsesGetHeadersWithoutBody();
+        testHeadStaticFileNotFoundHasHeadersWithoutBody();
+        testConfigParsesConnectionIdleTimeout();
+        testConfigDefaultsConnectionIdleTimeout();
         testThreadPoolExecutesTask();
         testThreadPoolCreatesWorkerWhenThreadCountIsZero();
         testThreadPoolRejectsTaskWhenQueueIsFull();
