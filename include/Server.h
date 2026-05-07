@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -9,6 +10,19 @@
 #include "ThreadPool.h"
 
 class HttpRequest;
+
+struct HttpResponseResult {
+    std::string response;
+    int statusCode = 0;
+    std::size_t bodySize = 0;
+    bool keepAlive = false;
+    bool sendFile = false;
+    std::string filePath;
+    std::uintmax_t fileSize = 0;
+    std::uintmax_t fileOffset = 0;
+    std::uintmax_t fileTransferSize = 0;
+    std::string contentType;
+};
 
 class Server {
 public:
@@ -23,31 +37,45 @@ public:
     Server& operator=(const Server&) = delete;
 
     bool start();
+    void stop();
 
 private:
     struct Impl;
 
     bool createSocket();
     bool createEventFd();
+    bool createShutdownEventFd();
+    bool installSignalHandlers();
+    void restoreSignalHandlers();
     bool bindSocket();
     bool listenSocket();
     void acceptLoop();
     void acceptReadyClients(int epollFd);
     void handleConnectionEvent(int epollFd, int fd, unsigned int events);
     void handleCompletionEvent(int epollFd);
+    void handleShutdownEvent();
     void readFromConnection(int epollFd, int fd);
     void writeToConnection(int epollFd, int fd);
     void processReadBuffer(int epollFd, int fd);
-    void queueResponse(int fd, unsigned long long connectionId, std::string response, bool closeAfterWrite);
+    void queueResponse(
+        int fd,
+        unsigned long long connectionId,
+        HttpResponseResult response,
+        bool closeAfterWrite,
+        std::string method,
+        std::string path,
+        std::chrono::steady_clock::time_point requestStartTime);
     void closeIdleConnections(int epollFd, std::chrono::steady_clock::time_point now);
+    void closeAllConnections(int epollFd);
     void closeConnection(int epollFd, int fd);
-    std::string buildResponse(const HttpRequest& request) const;
+    HttpResponseResult buildResponse(const HttpRequest& request) const;
     void notifyCompletionEvent();
+    void notifyShutdownEvent();
 
     unsigned short port_;
-    ThreadPool threadPool_;
     std::string rootDirectory_;
     StaticFileHandler staticFileHandler_;
     std::chrono::seconds connectionIdleTimeout_;
     std::unique_ptr<Impl> impl_;
+    ThreadPool threadPool_;
 };

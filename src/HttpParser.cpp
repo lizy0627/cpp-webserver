@@ -58,49 +58,6 @@ bool isValidToken(const std::string& value) {
     return true;
 }
 
-int hexValue(char value) {
-    if (value >= '0' && value <= '9') {
-        return value - '0';
-    }
-
-    if (value >= 'a' && value <= 'f') {
-        return value - 'a' + 10;
-    }
-
-    if (value >= 'A' && value <= 'F') {
-        return value - 'A' + 10;
-    }
-
-    return -1;
-}
-
-bool urlDecode(const std::string& encoded, std::string& decoded) {
-    decoded.clear();
-    decoded.reserve(encoded.size());
-
-    for (std::size_t i = 0; i < encoded.size(); ++i) {
-        if (encoded[i] != '%') {
-            decoded.push_back(encoded[i]);
-            continue;
-        }
-
-        if (i + 2 >= encoded.size()) {
-            return false;
-        }
-
-        const int high = hexValue(encoded[i + 1]);
-        const int low = hexValue(encoded[i + 2]);
-        if (high == -1 || low == -1) {
-            return false;
-        }
-
-        decoded.push_back(static_cast<char>((high << 4) | low));
-        i += 2;
-    }
-
-    return true;
-}
-
 std::string toLower(std::string value) {
     for (char& character : value) {
         character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -206,14 +163,9 @@ bool HttpParser::parse(const std::string& rawRequest, HttpRequest& request) {
         return false;
     }
 
-    std::string decodedPath;
-    if (!urlDecode(encodedPath, decodedPath)) {
-        return false;
-    }
-
     HttpRequest parsedRequest;
     parsedRequest.method = method;
-    parsedRequest.path = decodedPath;
+    parsedRequest.path = encodedPath;
     parsedRequest.version = version;
 
     std::size_t headerLength = 0;

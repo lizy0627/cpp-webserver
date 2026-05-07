@@ -20,6 +20,11 @@ void Logger::error(const std::string& message) {
     log(LogLevel::Error, message);
 }
 
+void Logger::access(const std::string& message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::cout << "[ACCESS] " << message << std::endl;
+}
+
 void Logger::log(LogLevel level, const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::cout << "[" << timestamp() << "] "

@@ -13,6 +13,11 @@ public:
     const std::string& root() const;
     std::chrono::seconds connectionIdleTimeout() const;
 
+    void setPort(unsigned short port);
+    void setThreadNum(std::size_t threadNum);
+    void setRoot(std::string root);
+    void setConnectionIdleTimeout(std::chrono::seconds timeout);
+
 private:
     void load(const std::string& filePath);
     void resetToDefaults();

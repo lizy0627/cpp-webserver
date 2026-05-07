@@ -39,6 +39,7 @@ function(webserver_apply_common_options target_name)
 endfunction()
 
 set(WEBSERVER_CORE_SOURCES
+    src/CommandLineOptions.cpp
     src/Config.cpp
     src/HttpParser.cpp
     src/HttpResponse.cpp

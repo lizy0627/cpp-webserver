@@ -12,11 +12,11 @@ Server::Server(
     std::string rootDirectory,
     std::chrono::seconds connectionIdleTimeout)
     : port_(port),
-      threadPool_(threadCount),
       rootDirectory_(std::move(rootDirectory)),
       staticFileHandler_(rootDirectory_),
       connectionIdleTimeout_(connectionIdleTimeout),
-      impl_(nullptr) {}
+      impl_(nullptr),
+      threadPool_(threadCount) {}
 
 Server::~Server() = default;
 
@@ -24,3 +24,5 @@ bool Server::start() {
     Logger::error("WebServer requires Linux epoll and POSIX sockets.");
     return false;
 }
+
+void Server::stop() {}

@@ -2,8 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
-#include <sstream>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -88,17 +87,29 @@ std::string extensionLower(const std::filesystem::path& path) {
     return extension;
 }
 
-bool readFile(const std::filesystem::path& filePath, std::string& body) {
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file) {
+bool parseUnsignedInteger(const std::string& value, std::uintmax_t& number) {
+    if (value.empty()) {
         return false;
     }
 
-    std::ostringstream stream;
-    stream << file.rdbuf();
-    body = stream.str();
+    std::uintmax_t parsed = 0;
+    for (char character : value) {
+        if (!std::isdigit(static_cast<unsigned char>(character))) {
+            return false;
+        }
+
+        const std::uintmax_t digit = static_cast<std::uintmax_t>(character - '0');
+        if (parsed > (std::numeric_limits<std::uintmax_t>::max() - digit) / 10) {
+            return false;
+        }
+
+        parsed = parsed * 10 + digit;
+    }
+
+    number = parsed;
     return true;
 }
+
 }
 
 StaticFileHandler::StaticFileHandler(std::string rootDirectory)
@@ -113,31 +124,72 @@ StaticFileHandler::StaticFileHandler(std::string rootDirectory)
     rootDirectoryReady_ = !error;
 }
 
-StaticFileResult StaticFileHandler::handle(const std::string& requestPath) const {
+StaticFileResult StaticFileHandler::handle(
+    const std::string& requestPath,
+    const std::optional<std::string>& rangeHeader) const {
     std::filesystem::path filePath;
     const StaticFileResult::Status resolvedStatus = resolveRequestPath(requestPath, filePath);
     if (resolvedStatus == StaticFileResult::Status::BadRequest) {
-        return {resolvedStatus, "text/plain; charset=utf-8", "Bad Request"};
+        return {resolvedStatus, "text/plain; charset=utf-8", "Bad Request", {}, 0};
     }
 
     if (resolvedStatus == StaticFileResult::Status::Forbidden) {
-        return {resolvedStatus, "text/plain; charset=utf-8", "Forbidden"};
+        return {resolvedStatus, "text/plain; charset=utf-8", "Forbidden", {}, 0};
     }
 
     if (resolvedStatus == StaticFileResult::Status::NotFound) {
-        return {resolvedStatus, "text/plain; charset=utf-8", "Not Found"};
+        return {resolvedStatus, "text/plain; charset=utf-8", "Not Found", {}, 0};
     }
 
     if (resolvedStatus == StaticFileResult::Status::Error) {
-        return {resolvedStatus, "text/plain; charset=utf-8", "Internal Server Error"};
+        return {resolvedStatus, "text/plain; charset=utf-8", "Internal Server Error", {}, 0};
     }
 
-    std::string body;
-    if (!readFile(filePath, body)) {
-        return {StaticFileResult::Status::Error, "text/plain; charset=utf-8", "Internal Server Error"};
+    std::error_code error;
+    const std::uintmax_t fileSize = std::filesystem::file_size(filePath, error);
+    if (error) {
+        return {
+            StaticFileResult::Status::Error,
+            "text/plain; charset=utf-8",
+            "Internal Server Error",
+            {},
+            0};
     }
 
-    return {StaticFileResult::Status::Ok, contentTypeForPath(filePath), body};
+    if (rangeHeader.has_value()) {
+        ParsedRange range;
+        if (!parseRangeHeader(*rangeHeader, fileSize, range)) {
+            return {
+                StaticFileResult::Status::RangeNotSatisfiable,
+                "text/plain; charset=utf-8",
+                "Range Not Satisfiable",
+                {},
+                fileSize,
+                false,
+                0,
+                0};
+        }
+
+        return {
+            StaticFileResult::Status::Ok,
+            contentTypeForPath(filePath),
+            "",
+            filePath,
+            fileSize,
+            true,
+            range.start,
+            range.end - range.start + 1};
+    }
+
+    return {
+        StaticFileResult::Status::Ok,
+        contentTypeForPath(filePath),
+        "",
+        filePath,
+        fileSize,
+        false,
+        0,
+        fileSize};
 }
 
 std::string StaticFileHandler::contentTypeForPath(const std::filesystem::path& path) {
@@ -192,6 +244,67 @@ std::string StaticFileHandler::contentTypeForPath(const std::filesystem::path& p
     }
 
     return "application/octet-stream";
+}
+
+bool StaticFileHandler::parseRangeHeader(
+    const std::string& rangeHeader,
+    std::uintmax_t fileSize,
+    ParsedRange& range) {
+    constexpr char rangeUnit[] = "bytes=";
+    constexpr std::size_t rangeUnitLength = sizeof(rangeUnit) - 1;
+
+    if (rangeHeader.compare(0, rangeUnitLength, rangeUnit) != 0) {
+        return false;
+    }
+
+    const std::string rangeSpec = rangeHeader.substr(rangeUnitLength);
+    if (rangeSpec.empty() || rangeSpec.find(',') != std::string::npos) {
+        return false;
+    }
+
+    const std::size_t dash = rangeSpec.find('-');
+    if (dash == std::string::npos || rangeSpec.find('-', dash + 1) != std::string::npos) {
+        return false;
+    }
+
+    const std::string first = rangeSpec.substr(0, dash);
+    const std::string last = rangeSpec.substr(dash + 1);
+    if (first.empty() && last.empty()) {
+        return false;
+    }
+
+    if (fileSize == 0) {
+        return false;
+    }
+
+    if (first.empty()) {
+        std::uintmax_t suffixLength = 0;
+        if (!parseUnsignedInteger(last, suffixLength) || suffixLength == 0) {
+            return false;
+        }
+
+        range.start = suffixLength >= fileSize ? 0 : fileSize - suffixLength;
+        range.end = fileSize - 1;
+        return true;
+    }
+
+    std::uintmax_t start = 0;
+    if (!parseUnsignedInteger(first, start)) {
+        return false;
+    }
+
+    std::uintmax_t end = fileSize - 1;
+    if (!last.empty() && !parseUnsignedInteger(last, end)) {
+        return false;
+    }
+
+    if (start >= fileSize || start > end) {
+        return false;
+    }
+
+    range.start = start;
+    range.end = std::min(end, fileSize - 1);
+    return true;
 }
 
 StaticFileResult::Status StaticFileHandler::resolveRequestPath(

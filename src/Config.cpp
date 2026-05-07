@@ -6,6 +6,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 constexpr unsigned short defaultPort = 8080;
@@ -53,6 +54,22 @@ const std::string& Config::root() const {
 
 std::chrono::seconds Config::connectionIdleTimeout() const {
     return connectionIdleTimeout_;
+}
+
+void Config::setPort(unsigned short port) {
+    port_ = port;
+}
+
+void Config::setThreadNum(std::size_t threadNum) {
+    threadNum_ = threadNum;
+}
+
+void Config::setRoot(std::string root) {
+    root_ = std::move(root);
+}
+
+void Config::setConnectionIdleTimeout(std::chrono::seconds timeout) {
+    connectionIdleTimeout_ = timeout;
 }
 
 void Config::load(const std::string& filePath) {
