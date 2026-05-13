@@ -1,6 +1,8 @@
 #include "HttpParser.h"
 
 #include <cctype>
+#include <cstddef>
+#include <limits>
 #include <map>
 #include <sstream>
 
@@ -117,6 +119,30 @@ bool shouldKeepAlive(const std::string& version, const std::map<std::string, std
 
     return requestedKeepAlive;
 }
+
+bool parseContentLengthValue(const std::string& value, std::size_t& contentLength) {
+    if (value.empty()) {
+        return false;
+    }
+
+    std::size_t parsed = 0;
+    for (char character : value) {
+        const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+        if (!std::isdigit(unsignedCharacter)) {
+            return false;
+        }
+
+        const std::size_t digit = static_cast<std::size_t>(character - '0');
+        if (parsed > (std::numeric_limits<std::size_t>::max() - digit) / 10) {
+            return false;
+        }
+
+        parsed = parsed * 10 + digit;
+    }
+
+    contentLength = parsed;
+    return true;
+}
 }
 
 bool HttpParser::parse(const std::string& rawRequest, HttpRequest& request) {
@@ -198,6 +224,17 @@ bool HttpParser::parse(const std::string& rawRequest, HttpRequest& request) {
         } else {
             existingHeader->second += ", " + value;
         }
+    }
+
+    const auto contentLengthHeader = parsedRequest.headers.find("content-length");
+    if (contentLengthHeader != parsedRequest.headers.end()) {
+        std::size_t contentLength = 0;
+        if (!parseContentLengthValue(contentLengthHeader->second, contentLength)) {
+            return false;
+        }
+
+        parsedRequest.hasContentLength = true;
+        parsedRequest.contentLength = contentLength;
     }
 
     parsedRequest.keepAlive = shouldKeepAlive(parsedRequest.version, parsedRequest.headers);

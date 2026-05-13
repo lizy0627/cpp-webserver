@@ -149,6 +149,20 @@ bool parseCommandLineOptions(
             }
 
             options.connectionIdleTimeout = timeout;
+        } else if (optionName == "--max-body-size") {
+            if (!hasValue(argc, i)) {
+                setMissingValueError(optionName, errorMessage);
+                return false;
+            }
+
+            const std::string value = argumentValue(argv[++i]);
+            std::size_t maxBodySize = 0;
+            if (!parseSizeValue(value, maxBodySize)) {
+                errorMessage = "invalid value for --max-body-size: expected positive integer bytes, got '" + value + "'";
+                return false;
+            }
+
+            options.maxRequestBodySize = maxBodySize;
         } else {
             errorMessage = "unknown option: " + optionName;
             return false;
@@ -169,6 +183,8 @@ std::string commandLineHelp(const std::string& programName) {
         "  --root <path>     Override static file root directory\n"
         "  --threads <num>   Override worker thread count\n"
         "  --timeout <sec>   Override idle connection timeout in seconds\n"
+        "  --max-body-size <bytes>\n"
+        "                    Override maximum POST request body size in bytes\n"
         "  --help            Print this help message and exit\n";
 }
 
@@ -187,5 +203,9 @@ void applyCommandLineOverridesToConfig(const CommandLineOptions& options, Config
 
     if (options.connectionIdleTimeout.has_value()) {
         config.setConnectionIdleTimeout(*options.connectionIdleTimeout);
+    }
+
+    if (options.maxRequestBodySize.has_value()) {
+        config.setMaxRequestBodySize(*options.maxRequestBodySize);
     }
 }

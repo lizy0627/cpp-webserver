@@ -30,6 +30,7 @@ CppWebServer 是一个基于 C++17 实现的 Linux 高性能静态 HTTP 服务�
 - 支持捕获 SIGINT/SIGTERM，触发 epoll 主循环优雅退出
 - 提供静态文件服务，默认根目录为 `www`
 - `GET /` 映射到 `www/index.html`
+- 支持目录索引：访问目录且不存在 `index.html` 时可生成 HTML 文件列表，开关由 `enable_directory_listing` 控制
 - 支持常见 MIME 类型：HTML、CSS、JavaScript、JSON、PNG、JPEG、GIF、SVG、ICO、PDF、WASM 等
 - 路径安全检查：拒绝 `..`、反斜杠、空字节、非法 URL 编码和越界访问
 - 对异常请求返回 400、403、404、405、413、416、500、503 等响应
@@ -151,7 +152,7 @@ cmake --build build
 可以通过命令行覆盖配置文件中的端口、静态资源目录、线程数和空闲连接超时时间：
 
 ```bash
-./build/WebServer --port 9090 --root www --threads 8 --timeout 60
+./build/WebServer --port 9090 --root www --threads 8 --timeout 60 --max-body-size 1048576
 ```
 
 也可以指定其他配置文件：
@@ -180,6 +181,17 @@ curl -i -H "Range: bytes=0-3" http://127.0.0.1:8080/
 curl -i -H "Range: bytes=3-" http://127.0.0.1:8080/
 curl -i -H "Range: bytes=-4" http://127.0.0.1:8080/
 curl -I -H "Range: bytes=0-3" http://127.0.0.1:8080/
+```
+
+访问目录时，服务器会先查找该目录下的 `index.html`；如果不存在且 `enable_directory_listing=true`，会动态生成目录索引页。目录索引包含文件名、是否目录、文件大小和修改时间，目录项链接会进行 URL 编码。`HEAD` 请求目录索引只返回 header，不发送 body；`Range` 请求不会作用于动态生成的目录索引，会按普通 200 响应返回完整索引。
+
+POST request bodies are capped by `max_request_body_size` (default `1048576` bytes). The server rejects a POST whose `Content-Length` is over the limit with `413 Payload Too Large`; while reading a POST body, it also returns 413 if buffered body bytes exceed the limit. `GET` and `HEAD` do not wait for a request body.
+
+```bash
+curl -i -X POST http://127.0.0.1:8080/api/echo -d "hello"
+python3 - <<'PY' | curl -i -X POST http://127.0.0.1:8080/api/echo --data-binary @-
+print("x" * (1024 * 1024 + 1), end="")
+PY
 ```
 
 访问日志会输出到标准输出，格式示例：
@@ -214,6 +226,11 @@ port=8080
 thread_num=4
 root=www
 connection_idle_timeout_seconds=30
+max_request_body_size=1048576
+enable_directory_listing=true
+enable_tls=false
+cert_file=cert.pem
+key_file=key.pem
 ```
 
 配置项说明：
@@ -224,6 +241,8 @@ connection_idle_timeout_seconds=30
 | `thread_num` | `4` | 线程池 worker 数量 |
 | `root` | `www` | 静态文件根目录 |
 | `connection_idle_timeout_seconds` | `30` | Keep-Alive 空闲连接超时时间，单位为秒 |
+| `max_request_body_size` | `1048576` | Maximum POST request body size in bytes; over-limit requests return 413 |
+| `enable_directory_listing` | `true` | 是否在目录缺少 `index.html` 时生成目录索引；设为 `false` 可关闭 |
 
 当配置文件不存在或配置非法时，程序会回退到默认配置。
 
@@ -236,13 +255,38 @@ connection_idle_timeout_seconds=30
 | `--root <path>` | 覆盖静态文件根目录 |
 | `--threads <num>` | 覆盖线程池 worker 数量，必须为正整数 |
 | `--timeout <sec>` | 覆盖 Keep-Alive 空闲连接超时时间，单位为秒，必须为正整数 |
+| `--max-body-size <bytes>` | Override maximum POST request body size in bytes |
 | `--help` | 打印帮助信息并退出 |
 
 示例：
 
 ```bash
-./build/WebServer --config config/server.conf --port 8081 --threads 8
+./build/WebServer --config config/server.conf --port 8081 --threads 8 --max-body-size 2097152
 ```
+
+### HTTPS/TLS
+
+TLS is optional and uses OpenSSL. When `enable_tls=false`, the server keeps the existing plain HTTP `recv/send/sendfile` behavior. When `enable_tls=true`, accepted connections perform `SSL_accept`, then HTTP/1.x requests are read and written with `SSL_read` and `SSL_write`.
+
+Generate a local self-signed certificate for testing:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout key.pem \
+  -out cert.pem \
+  -days 365 \
+  -subj "/CN=localhost"
+```
+
+Enable TLS in `config/server.conf`:
+
+```conf
+enable_tls=true
+cert_file=cert.pem
+key_file=key.pem
+```
+
+Use `curl -k https://127.0.0.1:8080/` with the self-signed certificate. HTTP/2 is not implemented; TLS mode serves the existing HTTP/1.x protocol.
 
 ## 测试方式
 
@@ -262,7 +306,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 - HTTP 请求解析：请求行、Header、原始 request-target 保留、HTTP/1.0 与 HTTP/1.1、Keep-Alive、非法报文拒绝
 - HTTP 响应生成：状态行、Header、`Content-Length`、`Connection`、自定义 Header、HEAD 无 body 响应
-- 静态文件服务：根路径映射、URL decode、query string 忽略、404、MIME 类型、路径穿越防护、文件元信息、单段 Range 解析
+- 静态文件服务：根路径映射、URL decode、query string 忽略、404、MIME 类型、路径穿越防护、文件元信息、目录索引、单段 Range 解析
 - 配置解析：端口、线程数、根目录、空闲连接超时、默认值
 - 命令行参数：默认配置路径、配置覆盖、非法参数和帮助信息
 - 线程池：任务执行、默认 worker 创建、队列满拒绝、析构时等待任务完成

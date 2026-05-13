@@ -38,6 +38,11 @@ void HttpResponse::setBody(const std::string& body) {
     contentLength_ = body_.size();
 }
 
+void HttpResponse::setJsonBody(const std::string& body) {
+    setContentType("application/json");
+    setBody(body);
+}
+
 void HttpResponse::setContentLength(std::size_t contentLength) {
     contentLength_ = contentLength;
 }

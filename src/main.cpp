@@ -21,6 +21,15 @@ int main(int argc, char* argv[]) {
     Config config(options.configPath);
     applyCommandLineOverridesToConfig(options, config);
 
-    Server server(config.port(), config.threadNum(), config.root(), config.connectionIdleTimeout());
+    Server server(
+        config.port(),
+        config.threadNum(),
+        config.root(),
+        config.enableDirectoryListing(),
+        config.connectionIdleTimeout(),
+        config.maxRequestBodySize(),
+        config.enableTls(),
+        config.certFile(),
+        config.keyFile());
     return server.start() ? 0 : 1;
 }

@@ -14,6 +14,7 @@ public:
     void setStatus(int statusCode, const std::string& statusText);
     void setContentType(const std::string& contentType);
     void setBody(const std::string& body);
+    void setJsonBody(const std::string& body);
     void setContentLength(std::size_t contentLength);
     void setHeader(const std::string& name, const std::string& value);
     void setKeepAlive(bool keepAlive);

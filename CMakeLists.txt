@@ -13,6 +13,11 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(OpenSSL REQUIRED)
+endif()
 
 function(webserver_apply_common_options target_name)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -41,11 +46,14 @@ endfunction()
 set(WEBSERVER_CORE_SOURCES
     src/CommandLineOptions.cpp
     src/Config.cpp
+    src/FileCache.cpp
     src/HttpParser.cpp
     src/HttpResponse.cpp
     src/Logger.cpp
+    src/Router.cpp
     src/StaticFileHandler.cpp
     src/ThreadPool.cpp
+    src/WebSocketHandshake.cpp
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -66,7 +74,16 @@ target_include_directories(WebServerCore
 target_link_libraries(WebServerCore
     PUBLIC
         Threads::Threads
+        ZLIB::ZLIB
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(WebServerCore
+        PUBLIC
+            OpenSSL::SSL
+            OpenSSL::Crypto
+    )
+endif()
 
 webserver_apply_common_options(WebServerCore)
 

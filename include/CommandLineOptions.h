@@ -13,6 +13,7 @@ struct CommandLineOptions {
     std::optional<std::string> root;
     std::optional<std::size_t> threadCount;
     std::optional<std::chrono::seconds> connectionIdleTimeout;
+    std::optional<std::size_t> maxRequestBodySize;
     bool showHelp = false;
 };
 

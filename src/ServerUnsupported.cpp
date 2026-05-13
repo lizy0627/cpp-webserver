@@ -10,11 +10,20 @@ Server::Server(
     unsigned short port,
     std::size_t threadCount,
     std::string rootDirectory,
-    std::chrono::seconds connectionIdleTimeout)
+    bool enableDirectoryListing,
+    std::chrono::seconds connectionIdleTimeout,
+    std::size_t maxRequestBodySize,
+    bool enableTls,
+    std::string certFile,
+    std::string keyFile)
     : port_(port),
       rootDirectory_(std::move(rootDirectory)),
-      staticFileHandler_(rootDirectory_),
+      staticFileHandler_(rootDirectory_, enableDirectoryListing),
       connectionIdleTimeout_(connectionIdleTimeout),
+      maxRequestBodySize_(maxRequestBodySize),
+      enableTls_(enableTls),
+      certFile_(std::move(certFile)),
+      keyFile_(std::move(keyFile)),
       impl_(nullptr),
       threadPool_(threadCount) {}
 

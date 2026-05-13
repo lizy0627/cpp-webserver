@@ -1,9 +1,12 @@
 #include "CommandLineOptions.h"
 #include "Config.h"
+#include "FileCache.h"
 #include "HttpParser.h"
 #include "HttpResponse.h"
+#include "Router.h"
 #include "StaticFileHandler.h"
 #include "ThreadPool.h"
+#include "WebSocketHandshake.h"
 
 #include <atomic>
 #include <chrono>
@@ -12,10 +15,13 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <zlib.h>
 
 namespace {
 void expect(bool condition, const char* message) {
@@ -62,6 +68,34 @@ void writeFile(const std::filesystem::path& path, const std::string& body) {
         throw std::runtime_error("failed to create test file");
     }
     file << body;
+}
+
+std::string gunzip(const std::string& compressed) {
+    z_stream stream {};
+    if (inflateInit2(&stream, MAX_WBITS + 16) != Z_OK) {
+        throw std::runtime_error("failed to initialize gzip inflater");
+    }
+
+    std::string output;
+    stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(compressed.data()));
+    stream.avail_in = static_cast<uInt>(compressed.size());
+
+    int result = Z_OK;
+    char buffer[4096];
+    do {
+        stream.next_out = reinterpret_cast<Bytef*>(buffer);
+        stream.avail_out = static_cast<uInt>(sizeof(buffer));
+        result = inflate(&stream, Z_NO_FLUSH);
+        if (result != Z_OK && result != Z_STREAM_END) {
+            inflateEnd(&stream);
+            throw std::runtime_error("failed to inflate gzip body");
+        }
+
+        output.append(buffer, sizeof(buffer) - stream.avail_out);
+    } while (result != Z_STREAM_END);
+
+    inflateEnd(&stream);
+    return output;
 }
 
 class TemporaryDirectory {
@@ -182,6 +216,44 @@ void testHttpParserParsesHeadRequest() {
     expect(request.method == "HEAD", "method should be HEAD");
     expect(request.path == "/index.html", "HEAD path should parse");
     expect(request.keepAlive, "HEAD HTTP/1.1 should keep alive by default");
+}
+
+void testHttpParserParsesContentLength() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "POST /api/echo HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Content-Length: 5\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "POST request with Content-Length should parse");
+    expect(request.method == "POST", "method should be POST");
+    expect(request.path == "/api/echo", "POST path should parse");
+    expect(request.hasContentLength, "Content-Length presence should be recorded");
+    expect(request.contentLength == 5, "Content-Length value should parse");
+    expect(request.body.empty(), "parser should not consume body bytes");
+}
+
+void testHttpParserRejectsInvalidContentLength() {
+    expectParseFailure(
+        "POST /api/echo HTTP/1.1\r\n"
+        "Content-Length: abc\r\n"
+        "\r\n",
+        "non-numeric Content-Length should fail");
+
+    expectParseFailure(
+        "POST /api/echo HTTP/1.1\r\n"
+        "Content-Length: -1\r\n"
+        "\r\n",
+        "negative Content-Length should fail");
+
+    expectParseFailure(
+        "POST /api/echo HTTP/1.1\r\n"
+        "Content-Length: 5\r\n"
+        "Content-Length: 5\r\n"
+        "\r\n",
+        "duplicate Content-Length should fail");
 }
 
 void testHttpParserRejectsUnsupportedHttpVersion() {
@@ -329,6 +401,199 @@ void testHttpResponseSerializesCustomHeaders() {
     expect(raw.find("Content-Range: bytes 0-3/10\r\n") != std::string::npos, "content range should serialize");
 }
 
+void testHttpResponseSupportsJsonBody() {
+    HttpResponse response(200, "OK");
+    response.setJsonBody("{\"ok\":true}");
+
+    const std::string raw = response.toString();
+    expect(
+        raw.find("Content-Type: application/json\r\n") != std::string::npos,
+        "JSON content type should serialize");
+    expect(responseBody(raw) == "{\"ok\":true}", "JSON response body should serialize");
+}
+
+void testRouterHandlesPingRoute() {
+    Router router;
+    HttpRequest request;
+    request.method = "GET";
+    request.path = "/api/ping";
+    request.keepAlive = true;
+
+    const std::optional<HttpResponse> response = router.handle(request);
+    expect(response.has_value(), "router should handle /api/ping");
+
+    const std::string raw = response->toString();
+    expect(raw.find("HTTP/1.1 200 OK\r\n") == 0, "ping should return 200");
+    expect(
+        raw.find("Content-Type: application/json\r\n") != std::string::npos,
+        "ping should return JSON");
+    expect(raw.find("Connection: keep-alive\r\n") != std::string::npos, "ping should preserve keep-alive");
+    expect(responseBody(raw) == "{\"message\":\"pong\"}", "ping body should be pong JSON");
+}
+
+void testRouterHandlesTimeRoute() {
+    Router router;
+    HttpRequest request;
+    request.method = "GET";
+    request.path = "/api/time";
+
+    const std::optional<HttpResponse> response = router.handle(request);
+    expect(response.has_value(), "router should handle /api/time");
+
+    const std::string raw = response->toString();
+    expect(raw.find("HTTP/1.1 200 OK\r\n") == 0, "time should return 200");
+    expect(responseBody(raw).find("{\"time\":\"") == 0, "time should return a JSON time field");
+}
+
+void testRouterEchoesRequestBody() {
+    Router router;
+    HttpRequest request;
+    request.method = "POST";
+    request.path = "/api/echo";
+    request.headers["content-type"] = "application/json";
+    request.body = "{\"hello\":\"world\"}";
+
+    const std::optional<HttpResponse> response = router.handle(request);
+    expect(response.has_value(), "router should handle /api/echo");
+
+    const std::string raw = response->toString();
+    expect(raw.find("HTTP/1.1 200 OK\r\n") == 0, "echo should return 200");
+    expect(
+        raw.find("Content-Type: application/json\r\n") != std::string::npos,
+        "echo should preserve request content type");
+    expect(responseBody(raw) == request.body, "echo should return request body");
+}
+
+void testRouterReturnsNotFoundForUnknownApiRoute() {
+    Router router;
+    HttpRequest request;
+    request.method = "GET";
+    request.path = "/api/missing";
+
+    const std::optional<HttpResponse> response = router.handle(request);
+    expect(response.has_value(), "router should handle unknown /api paths");
+
+    const std::string raw = response->toString();
+    expect(raw.find("HTTP/1.1 404 Not Found\r\n") == 0, "unknown API route should return 404");
+    expect(responseBody(raw) == "{\"error\":\"not found\"}", "unknown API route should return JSON error");
+}
+
+void testRouterIgnoresNonApiPaths() {
+    Router router;
+    HttpRequest request;
+    request.method = "GET";
+    request.path = "/index.html";
+
+    expect(!router.handle(request).has_value(), "router should let non-API paths fall through to static files");
+}
+
+void testRouterMatchesMethodAndPathForRegisteredRoutes() {
+    Router router;
+    router.addRoute("PUT", "/api/custom", [](const HttpRequest&) {
+        HttpResponse response(201, "Created");
+        response.setJsonBody("{\"created\":true}");
+        return response;
+    });
+
+    HttpRequest request;
+    request.method = "PUT";
+    request.path = "/api/custom?trace=1";
+
+    const std::optional<HttpResponse> response = router.handle(request);
+    expect(response.has_value(), "custom route should be handled");
+
+    const std::string raw = response->toString();
+    expect(raw.find("HTTP/1.1 201 Created\r\n") == 0, "custom route should use registered handler");
+    expect(responseBody(raw) == "{\"created\":true}", "custom route should return registered body");
+}
+
+void testWebSocketHandshakeComputesAcceptKey() {
+    const std::string accept = WebSocketHandshake::acceptForKey("dGhlIHNhbXBsZSBub25jZQ==");
+    expect(
+        accept == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+        "WebSocket accept key should match RFC example");
+}
+
+void testWebSocketHandshakeAcceptsValidRequest() {
+    HttpRequest request;
+    const bool parsed = HttpParser::parse(
+        "GET /ws HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: keep-alive, Upgrade\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n",
+        request);
+
+    expect(parsed, "valid WebSocket handshake request should parse");
+    expect(WebSocketHandshake::isEndpoint(request), "WebSocket endpoint should be recognized");
+
+    const std::optional<std::string> accept = WebSocketHandshake::acceptForRequest(request);
+    expect(accept.has_value(), "valid WebSocket handshake should produce accept key");
+    expect(*accept == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "valid WebSocket accept key should match");
+}
+
+void testWebSocketHandshakeRejectsInvalidRequest() {
+    HttpRequest missingUpgrade;
+    expect(
+        HttpParser::parse(
+            "GET /ws HTTP/1.1\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n",
+            missingUpgrade),
+        "missing upgrade fixture should parse");
+    expect(
+        !WebSocketHandshake::acceptForRequest(missingUpgrade).has_value(),
+        "missing Upgrade header should reject WebSocket handshake");
+
+    HttpRequest wrongVersion;
+    expect(
+        HttpParser::parse(
+            "GET /ws HTTP/1.1\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 12\r\n"
+            "\r\n",
+            wrongVersion),
+        "wrong version fixture should parse");
+    expect(
+        !WebSocketHandshake::acceptForRequest(wrongVersion).has_value(),
+        "Sec-WebSocket-Version other than 13 should reject handshake");
+
+    HttpRequest shortKey;
+    expect(
+        HttpParser::parse(
+            "GET /ws HTTP/1.1\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: c2hvcnQ=\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n",
+            shortKey),
+        "short key fixture should parse");
+    expect(
+        !WebSocketHandshake::acceptForRequest(shortKey).has_value(),
+        "Sec-WebSocket-Key must decode to 16 bytes");
+}
+
+void testWebSocketHandshakeSerializesSwitchingProtocolsResponse() {
+    const std::string raw =
+        WebSocketHandshake::switchingProtocolsResponse("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+
+    expect(
+        raw ==
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+            "\r\n",
+        "WebSocket 101 response should contain only upgrade headers");
+}
+
 void testStaticFileHandlerServesIndexForRoot() {
     StaticFileHandler handler(WEBSERVER_TEST_WWW_DIR);
 
@@ -337,7 +602,110 @@ void testStaticFileHandlerServesIndexForRoot() {
     expect(index.contentType == "text/html; charset=utf-8", "index content type should be HTML");
     expect(!index.filePath.empty(), "index file path should be recorded");
     expect(index.fileSize > 0, "index file size should be recorded");
-    expect(index.body.empty(), "successful static file result should not preload body");
+    expect(index.dynamicBody, "small index should be served from cache");
+    expect(index.body.size() == index.fileSize, "cached index body should match file size");
+}
+
+void testStaticFileHandlerServesIndexBeforeDirectoryListing() {
+    TemporaryDirectory root;
+    std::filesystem::create_directories(root.path() / "docs");
+    writeFile(root.path() / "docs" / "index.html", "docs index");
+
+    StaticFileHandler handler(root.path().string(), true);
+    const StaticFileResult result = handler.handle("/docs/");
+
+    expect(result.status == StaticFileResult::Status::Ok, "directory index.html should be served first");
+    expect(result.dynamicBody, "small index.html should be served from cache");
+    expect(result.body == "docs index", "cached directory index should include file body");
+    expect(result.filePath.filename() == "index.html", "directory should resolve to index.html");
+    expect(result.fileSize == 10, "index.html file size should be recorded");
+}
+
+void testStaticFileHandlerBuildsDirectoryListingWhenIndexMissing() {
+    TemporaryDirectory root;
+    std::filesystem::create_directories(root.path() / "docs" / "assets");
+    writeFile(root.path() / "docs" / "read me.txt", "hello");
+
+    StaticFileHandler handler(root.path().string(), true);
+    const StaticFileResult result = handler.handle("/docs/");
+
+    expect(result.status == StaticFileResult::Status::Ok, "directory without index should return listing");
+    expect(result.dynamicBody, "directory listing should be a dynamic body");
+    expect(result.contentType == "text/html; charset=utf-8", "directory listing should be HTML");
+    expect(result.contentLength == result.body.size(), "directory listing length should match body");
+    expect(result.body.find("read me.txt") != std::string::npos, "listing should include file name");
+    expect(result.body.find("assets/") != std::string::npos, "listing should include directory name");
+    expect(result.body.find("href=\"/docs/read%20me.txt\"") != std::string::npos, "file link should be URL encoded");
+    expect(result.body.find("<td>yes</td>") != std::string::npos, "listing should show directory flag");
+    expect(result.body.find("<td>5</td>") != std::string::npos, "listing should show file size");
+}
+
+void testStaticFileHandlerCanDisableDirectoryListing() {
+    TemporaryDirectory root;
+    std::filesystem::create_directories(root.path() / "docs");
+
+    StaticFileHandler handler(root.path().string(), false);
+    const StaticFileResult result = handler.handle("/docs/");
+
+    expect(result.status == StaticFileResult::Status::Forbidden, "disabled directory listing should return 403");
+}
+
+void testStaticFileHandlerIgnoresRangeForDirectoryListing() {
+    TemporaryDirectory root;
+    std::filesystem::create_directories(root.path() / "docs");
+    writeFile(root.path() / "docs" / "file.txt", "hello");
+
+    StaticFileHandler handler(root.path().string(), true);
+    const StaticFileResult result = handler.handle("/docs/", std::string("bytes=0-3"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "directory listing should ignore Range");
+    expect(result.dynamicBody, "range on directory listing should still produce dynamic listing");
+    expect(!result.partialContent, "directory listing Range should not return partial content metadata");
+    expect(result.contentOffset == 0, "directory listing should not use range offset");
+    expect(result.contentLength == result.body.size(), "directory listing should keep full body length");
+}
+
+void testHeadDirectoryListingUsesHeadersWithoutBody() {
+    TemporaryDirectory root;
+    std::filesystem::create_directories(root.path() / "docs");
+    writeFile(root.path() / "docs" / "file.txt", "hello");
+
+    StaticFileHandler handler(root.path().string(), true);
+    const StaticFileResult listing = handler.handle("/docs/");
+    expect(listing.status == StaticFileResult::Status::Ok, "HEAD directory listing target should resolve");
+    expect(listing.dynamicBody, "HEAD directory listing fixture should be dynamic");
+
+    HttpResponse response(200, "OK");
+    response.setContentType(listing.contentType);
+    response.setBody(listing.body);
+
+    const std::string headRaw = response.toString(false);
+    expect(headRaw.find("HTTP/1.1 200 OK\r\n") == 0, "HEAD directory listing should return 200");
+    expect(
+        headRaw.find("Content-Length: " + std::to_string(listing.body.size()) + "\r\n") != std::string::npos,
+        "HEAD directory listing should keep generated body length");
+    expect(responseBody(headRaw).empty(), "HEAD directory listing should not include body");
+}
+
+void testStaticFileHandlerSkipsDirectoryEntriesOutsideRoot() {
+    TemporaryDirectory root;
+    TemporaryDirectory outside;
+    std::filesystem::create_directories(root.path() / "docs");
+    writeFile(root.path() / "docs" / "inside.txt", "inside");
+    writeFile(outside.path() / "secret.txt", "secret");
+
+    std::error_code error;
+    std::filesystem::create_directory_symlink(outside.path(), root.path() / "docs" / "outside", error);
+    if (error) {
+        return;
+    }
+
+    StaticFileHandler handler(root.path().string(), true);
+    const StaticFileResult result = handler.handle("/docs/");
+
+    expect(result.status == StaticFileResult::Status::Ok, "directory listing with symlink should return 200");
+    expect(result.body.find("inside.txt") != std::string::npos, "listing should include in-root entry");
+    expect(result.body.find("outside/") == std::string::npos, "listing should skip symlinked directory outside root");
 }
 
 void testStaticFileHandlerReturnsNotFoundForMissingFile() {
@@ -358,7 +726,82 @@ void testStaticFileHandlerServesPlainPath() {
     expect(result.filePath.filename() == "hello.txt", "plain path file name should match fixture");
     expect(result.fileSize == 5, "plain path file size should match fixture");
     expect(result.contentLength == 5, "plain path content length should match fixture");
-    expect(result.body.empty(), "plain path should not preload body");
+    expect(result.dynamicBody, "small plain path should be served from cache");
+    expect(result.body == "plain", "plain path cached body should match fixture");
+}
+
+void testStaticFileHandlerGzipsSmallTextWhenAccepted() {
+    TemporaryDirectory root;
+    const std::string script = "const value = 42;\n" + std::string(256, 'x');
+    writeFile(root.path() / "app.js", script);
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/app.js",
+        std::nullopt,
+        std::nullopt,
+        std::string("br, gzip;q=1.0"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "gzip target should be served");
+    expect(result.gzipEncoded, "small JavaScript should be gzip encoded when accepted");
+    expect(result.dynamicBody, "gzip response should be returned from memory");
+    expect(result.contentType == "application/javascript; charset=utf-8", "gzip should keep content type");
+    expect(result.contentLength == result.body.size(), "gzip content length should be compressed body length");
+    expect(result.body.size() >= 2, "gzip body should not be empty");
+    expect(
+        static_cast<unsigned char>(result.body[0]) == 0x1f &&
+            static_cast<unsigned char>(result.body[1]) == 0x8b,
+        "gzip body should include gzip magic bytes");
+    expect(gunzip(result.body) == script, "gzip body should decompress to original content");
+}
+
+void testStaticFileHandlerSkipsGzipWhenQualityIsZero() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "style.css", "body { color: red; }\n");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/style.css",
+        std::nullopt,
+        std::nullopt,
+        std::string("gzip;q=0, *;q=1"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "q=0 gzip target should be served");
+    expect(!result.gzipEncoded, "explicit gzip q=0 should disable gzip");
+    expect(result.body == "body { color: red; }\n", "q=0 gzip body should stay uncompressed");
+}
+
+void testStaticFileHandlerSkipsGzipForBinaryContent() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "image.png", "not really a png");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/image.png",
+        std::nullopt,
+        std::nullopt,
+        std::string("gzip"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "binary target should be served");
+    expect(!result.gzipEncoded, "image/png should not be gzip encoded");
+    expect(result.body == "not really a png", "binary body should stay uncompressed");
+}
+
+void testStaticFileHandlerSkipsGzipForRangeRequest() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "range.txt", "0123456789");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/range.txt",
+        std::string("bytes=0-3"),
+        std::nullopt,
+        std::string("gzip"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "range gzip target should be served");
+    expect(result.partialContent, "range request should keep partial content metadata");
+    expect(!result.gzipEncoded, "range request should not be gzip encoded");
+    expect(result.body == "0123", "range request should keep sliced body");
 }
 
 void testStaticFileHandlerDecodesUrlEncodedSpace() {
@@ -460,6 +903,7 @@ void testStaticFileHandlerParsesExplicitByteRange() {
     expect(result.fileSize == 10, "range total size should match file size");
     expect(result.contentOffset == 0, "bytes=0-3 should start at offset 0");
     expect(result.contentLength == 4, "bytes=0-3 should have length 4");
+    expect(result.body == "0123", "small range should be sliced from cached body");
 }
 
 void testStaticFileHandlerParsesOpenEndedByteRange() {
@@ -473,6 +917,7 @@ void testStaticFileHandlerParsesOpenEndedByteRange() {
     expect(result.partialContent, "open ended range should mark partial content");
     expect(result.contentOffset == 3, "bytes=3- should start at offset 3");
     expect(result.contentLength == 7, "bytes=3- should continue through EOF");
+    expect(result.body == "3456789", "small open-ended range should be sliced from cached body");
 }
 
 void testStaticFileHandlerParsesSuffixByteRange() {
@@ -486,6 +931,184 @@ void testStaticFileHandlerParsesSuffixByteRange() {
     expect(result.partialContent, "suffix range should mark partial content");
     expect(result.contentOffset == 6, "bytes=-4 should start four bytes before EOF");
     expect(result.contentLength == 4, "bytes=-4 should have length 4");
+    expect(result.body == "6789", "small suffix range should be sliced from cached body");
+}
+
+void testStaticFileHandlerKeepsLargeFilesOnSendfilePath() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "large.bin", std::string(70 * 1024, 'x'));
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle("/large.bin");
+
+    expect(result.status == StaticFileResult::Status::Ok, "large file should be served");
+    expect(!result.dynamicBody, "large file should not be loaded into cache");
+    expect(result.body.empty(), "large file body should be left for sendfile");
+    expect(result.contentLength == result.fileSize, "large file content length should match file size");
+}
+
+void testStaticFileHandlerKeepsLargeCompressibleFilesOnSendfilePath() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "large.txt", std::string(70 * 1024, 'x'));
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/large.txt",
+        std::nullopt,
+        std::nullopt,
+        std::string("gzip"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "large text file should be served");
+    expect(!result.dynamicBody, "large text file should stay on sendfile path");
+    expect(!result.gzipEncoded, "large text file should not be gzip encoded yet");
+    expect(result.body.empty(), "large text body should be left for sendfile");
+    expect(result.contentLength == result.fileSize, "large text content length should match file size");
+}
+
+void testStaticFileHandlerKeepsLargeRangeOnSendfilePath() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "large.bin", std::string(70 * 1024, 'x'));
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle("/large.bin", std::string("bytes=10-19"));
+
+    expect(result.status == StaticFileResult::Status::Ok, "large range should be satisfiable");
+    expect(result.partialContent, "large range should mark partial content");
+    expect(!result.dynamicBody, "large range should stay on sendfile path");
+    expect(result.body.empty(), "large range body should be left for sendfile");
+    expect(result.contentOffset == 10, "large range offset should be recorded");
+    expect(result.contentLength == 10, "large range length should be recorded");
+}
+
+void testStaticFileHandlerReloadsCachedFileWhenModified() {
+    TemporaryDirectory root;
+    const std::filesystem::path filePath = root.path() / "reload.txt";
+    writeFile(filePath, "first");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult first = handler.handle("/reload.txt");
+    expect(first.status == StaticFileResult::Status::Ok, "initial cached file should be served");
+    expect(first.body == "first", "initial cached body should match fixture");
+
+    const std::filesystem::file_time_type originalModified = std::filesystem::last_write_time(filePath);
+    writeFile(filePath, "again");
+    std::filesystem::last_write_time(filePath, originalModified + std::chrono::seconds(2));
+
+    const StaticFileResult second = handler.handle("/reload.txt");
+    expect(second.status == StaticFileResult::Status::Ok, "modified cached file should be served");
+    expect(second.body == "again", "modified cached file should be reloaded");
+}
+
+void testStaticFileHandlerAddsStableEtag() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "etag.txt", "etag-body");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult first = handler.handle("/etag.txt");
+    const StaticFileResult second = handler.handle("/etag.txt");
+
+    expect(first.status == StaticFileResult::Status::Ok, "ETag fixture should be served");
+    expect(!first.etag.empty(), "static file should include an ETag");
+    expect(first.etag.front() == '"' && first.etag.back() == '"', "ETag should be quoted");
+    expect(second.etag == first.etag, "unchanged file should keep the same ETag");
+}
+
+void testStaticFileHandlerIfNoneMatchReturnsNotModified() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "etag.txt", "etag-body");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult original = handler.handle("/etag.txt");
+    expect(original.status == StaticFileResult::Status::Ok, "original ETag fixture should be served");
+
+    const StaticFileResult cached = handler.handle("/etag.txt", std::nullopt, original.etag);
+
+    expect(
+        cached.status == StaticFileResult::Status::NotModified,
+        "matching If-None-Match should return not modified");
+    expect(cached.etag == original.etag, "304 should keep matching ETag");
+    expect(cached.body.empty(), "304 should not include a body");
+    expect(cached.contentLength == 0, "304 content length metadata should be zero");
+}
+
+void testStaticFileHandlerIfNoneMatchSupportsListsAndWeakEtags() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "etag.txt", "etag-body");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult original = handler.handle("/etag.txt");
+    expect(original.status == StaticFileResult::Status::Ok, "original ETag fixture should be served");
+
+    const StaticFileResult listed = handler.handle(
+        "/etag.txt",
+        std::nullopt,
+        "\"missing\", W/" + original.etag);
+
+    expect(
+        listed.status == StaticFileResult::Status::NotModified,
+        "If-None-Match should support lists and weak ETags");
+}
+
+void testStaticFileHandlerIfNoneMatchTakesPriorityOverRange() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "range-etag.txt", "0123456789");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult original = handler.handle("/range-etag.txt");
+    expect(original.status == StaticFileResult::Status::Ok, "original range ETag fixture should be served");
+
+    const StaticFileResult cached = handler.handle(
+        "/range-etag.txt",
+        std::string("bytes=0-3"),
+        original.etag);
+
+    expect(
+        cached.status == StaticFileResult::Status::NotModified,
+        "matching If-None-Match should return 304 before Range handling");
+    expect(!cached.partialContent, "304 should not be marked as partial content");
+    expect(cached.body.empty(), "304 from range request should not include a body");
+}
+
+void testStaticFileHandlerRangeRunsWhenIfNoneMatchMisses() {
+    TemporaryDirectory root;
+    writeFile(root.path() / "range-etag.txt", "0123456789");
+
+    StaticFileHandler handler(root.path().string());
+    const StaticFileResult result = handler.handle(
+        "/range-etag.txt",
+        std::string("bytes=0-3"),
+        std::string("\"different\""));
+
+    expect(result.status == StaticFileResult::Status::Ok, "ETag miss should continue to Range handling");
+    expect(result.partialContent, "ETag miss with Range should return partial content");
+    expect(result.contentLength == 4, "ETag miss range should keep requested length");
+    expect(result.body == "0123", "ETag miss range should return sliced body");
+}
+
+void testFileCacheEvictsLeastRecentlyUsedEntry() {
+    TemporaryDirectory root;
+    const std::filesystem::path firstPath = root.path() / "first.txt";
+    const std::filesystem::path secondPath = root.path() / "second.txt";
+    writeFile(firstPath, "aaaaa");
+    writeFile(secondPath, "bbbbb");
+
+    FileCache cache(64, 8);
+    const std::filesystem::file_time_type firstModified = std::filesystem::file_time_type::clock::now();
+    const std::filesystem::file_time_type secondModified = firstModified + std::chrono::seconds(1);
+
+    const std::optional<FileCache::Entry> first =
+        cache.get(firstPath, 5, firstModified, "text/plain; charset=utf-8");
+    expect(first.has_value() && first->content == "aaaaa", "first cache load should succeed");
+
+    const std::optional<FileCache::Entry> second =
+        cache.get(secondPath, 5, secondModified, "text/plain; charset=utf-8");
+    expect(second.has_value() && second->content == "bbbbb", "second cache load should succeed");
+    expect(cache.currentSize() == 5, "cache should evict one entry when capacity is exceeded");
+
+    writeFile(firstPath, "ccccc");
+    const std::optional<FileCache::Entry> reloaded =
+        cache.get(firstPath, 5, firstModified, "text/plain; charset=utf-8");
+    expect(reloaded.has_value() && reloaded->content == "ccccc", "LRU entry should be reloaded after eviction");
 }
 
 void testStaticFileHandlerRejectsUnsatisfiableByteRange() {
@@ -582,7 +1205,12 @@ void testConfigParsesConnectionIdleTimeout() {
         "port=9090\n"
         "thread_num=2\n"
         "root=www\n"
-        "connection_idle_timeout_seconds=5\n");
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=2048\n"
+        "enable_directory_listing=false\n"
+        "enable_tls=true\n"
+        "cert_file=test-cert.pem\n"
+        "key_file=test-key.pem\n");
 
     Config config(configPath.string());
 
@@ -592,15 +1220,82 @@ void testConfigParsesConnectionIdleTimeout() {
     expect(
         config.connectionIdleTimeout() == std::chrono::seconds(5),
         "config should parse connection idle timeout");
+    expect(config.maxRequestBodySize() == 2048, "config should parse max request body size");
+    expect(!config.enableDirectoryListing(), "config should parse directory listing flag");
+    expect(config.enableTls(), "config should parse TLS flag");
+    expect(config.certFile() == "test-cert.pem", "config should parse TLS certificate path");
+    expect(config.keyFile() == "test-key.pem", "config should parse TLS private key path");
 }
 
-void testConfigDefaultsConnectionIdleTimeout() {
+void testConfigDefaultsRequestLimits() {
     TemporaryDirectory root;
     Config config((root.path() / "missing.conf").string());
 
     expect(
         config.connectionIdleTimeout() == std::chrono::seconds(30),
         "missing config should use default connection idle timeout");
+    expect(
+        config.maxRequestBodySize() == 1024 * 1024,
+        "missing config should use default max request body size");
+    expect(config.enableDirectoryListing(), "missing config should use default directory listing flag");
+    expect(!config.enableTls(), "missing config should disable TLS by default");
+    expect(config.certFile() == "cert.pem", "missing config should use default certificate path");
+    expect(config.keyFile() == "key.pem", "missing config should use default private key path");
+}
+
+void testConfigRejectsInvalidTlsFlag() {
+    TemporaryDirectory root;
+    const std::filesystem::path configPath = root.path() / "server.conf";
+    writeFile(
+        configPath,
+        "port=9090\n"
+        "thread_num=2\n"
+        "root=www\n"
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=2048\n"
+        "enable_tls=maybe\n");
+
+    Config config(configPath.string());
+
+    expect(config.port() == 8080, "invalid TLS flag should reset config to default port");
+    expect(!config.enableTls(), "invalid TLS flag should reset TLS to default");
+}
+
+void testConfigRejectsInvalidMaxRequestBodySize() {
+    TemporaryDirectory root;
+    const std::filesystem::path configPath = root.path() / "server.conf";
+    writeFile(
+        configPath,
+        "port=9090\n"
+        "thread_num=2\n"
+        "root=www\n"
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=0\n");
+
+    Config config(configPath.string());
+
+    expect(config.port() == 8080, "invalid max body size should reset config to default port");
+    expect(
+        config.maxRequestBodySize() == 1024 * 1024,
+        "invalid max body size should reset to default max request body size");
+}
+
+void testConfigRejectsInvalidDirectoryListingFlag() {
+    TemporaryDirectory root;
+    const std::filesystem::path configPath = root.path() / "server.conf";
+    writeFile(
+        configPath,
+        "port=9090\n"
+        "thread_num=2\n"
+        "root=www\n"
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=2048\n"
+        "enable_directory_listing=maybe\n");
+
+    Config config(configPath.string());
+
+    expect(config.port() == 8080, "invalid directory listing flag should reset config to default port");
+    expect(config.enableDirectoryListing(), "invalid directory listing flag should reset to default");
 }
 
 void testCommandLineUsesDefaultConfigPath() {
@@ -621,7 +1316,8 @@ void testCommandLineOverridesPort() {
         "port=8081\n"
         "thread_num=2\n"
         "root=www\n"
-        "connection_idle_timeout_seconds=5\n");
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=2048\n");
 
     CommandLineOptions options;
     std::string errorMessage;
@@ -634,6 +1330,33 @@ void testCommandLineOverridesPort() {
 
     expect(config.port() == 9090, "command line port should override config file port");
     expect(config.threadNum() == 2, "non-overridden thread count should come from config file");
+    expect(config.maxRequestBodySize() == 2048, "non-overridden max body size should come from config file");
+}
+
+void testCommandLineOverridesMaxRequestBodySize() {
+    TemporaryDirectory root;
+    const std::filesystem::path configPath = root.path() / "server.conf";
+    writeFile(
+        configPath,
+        "port=8081\n"
+        "thread_num=2\n"
+        "root=www\n"
+        "connection_idle_timeout_seconds=5\n"
+        "max_request_body_size=2048\n");
+
+    CommandLineOptions options;
+    std::string errorMessage;
+    expect(
+        parseArguments(
+            {"WebServer", "--config", configPath.string(), "--max-body-size", "4096"},
+            options,
+            errorMessage),
+        "max body size override arguments should parse");
+
+    Config config(options.configPath);
+    applyCommandLineOverridesToConfig(options, config);
+
+    expect(config.maxRequestBodySize() == 4096, "command line max body size should override config file");
 }
 
 void testCommandLineRejectsInvalidPort() {
@@ -643,6 +1366,21 @@ void testCommandLineRejectsInvalidPort() {
     expect(!parseArguments({"WebServer", "--port", "70000"}, options, errorMessage), "invalid port should fail");
     expect(errorMessage.find("--port") != std::string::npos, "invalid port error should name --port");
     expect(errorMessage.find("1-65535") != std::string::npos, "invalid port error should mention valid range");
+}
+
+void testCommandLineRejectsInvalidMaxRequestBodySize() {
+    CommandLineOptions options;
+    std::string errorMessage;
+
+    expect(
+        !parseArguments({"WebServer", "--max-body-size", "0"}, options, errorMessage),
+        "zero max body size should fail");
+    expect(
+        errorMessage.find("--max-body-size") != std::string::npos,
+        "invalid max body size error should name --max-body-size");
+    expect(
+        errorMessage.find("positive integer bytes") != std::string::npos,
+        "invalid max body size error should mention expected bytes");
 }
 
 void testCommandLineHelpOutput() {
@@ -656,6 +1394,7 @@ void testCommandLineHelpOutput() {
     expect(help.find("Usage: WebServer [options]") != std::string::npos, "help should include usage");
     expect(help.find("--config <path>") != std::string::npos, "help should include --config");
     expect(help.find("--port <port>") != std::string::npos, "help should include --port");
+    expect(help.find("--max-body-size <bytes>") != std::string::npos, "help should include --max-body-size");
     expect(help.find("--help") != std::string::npos, "help should include --help");
 }
 
@@ -735,6 +1474,8 @@ int main() {
         testHttpParserHttp10ClosesByDefault();
         testHttpParserHttp10ConnectionKeepAliveEnablesKeepAlive();
         testHttpParserParsesHeadRequest();
+        testHttpParserParsesContentLength();
+        testHttpParserRejectsInvalidContentLength();
         testHttpParserRejectsUnsupportedHttpVersion();
         testHttpParserRejectsPathWithoutLeadingSlash();
         testHttpParserRejectsInvalidHeader();
@@ -746,9 +1487,30 @@ int main() {
         testHttpResponseSerializesKeepAliveConnectionHeader();
         testHttpResponseCanSerializeHeadersWithoutBody();
         testHttpResponseSerializesCustomHeaders();
+        testHttpResponseSupportsJsonBody();
+        testRouterHandlesPingRoute();
+        testRouterHandlesTimeRoute();
+        testRouterEchoesRequestBody();
+        testRouterReturnsNotFoundForUnknownApiRoute();
+        testRouterIgnoresNonApiPaths();
+        testRouterMatchesMethodAndPathForRegisteredRoutes();
+        testWebSocketHandshakeComputesAcceptKey();
+        testWebSocketHandshakeAcceptsValidRequest();
+        testWebSocketHandshakeRejectsInvalidRequest();
+        testWebSocketHandshakeSerializesSwitchingProtocolsResponse();
         testStaticFileHandlerServesIndexForRoot();
+        testStaticFileHandlerServesIndexBeforeDirectoryListing();
+        testStaticFileHandlerBuildsDirectoryListingWhenIndexMissing();
+        testStaticFileHandlerCanDisableDirectoryListing();
+        testStaticFileHandlerIgnoresRangeForDirectoryListing();
+        testHeadDirectoryListingUsesHeadersWithoutBody();
+        testStaticFileHandlerSkipsDirectoryEntriesOutsideRoot();
         testStaticFileHandlerReturnsNotFoundForMissingFile();
         testStaticFileHandlerServesPlainPath();
+        testStaticFileHandlerGzipsSmallTextWhenAccepted();
+        testStaticFileHandlerSkipsGzipWhenQualityIsZero();
+        testStaticFileHandlerSkipsGzipForBinaryContent();
+        testStaticFileHandlerSkipsGzipForRangeRequest();
         testStaticFileHandlerDecodesUrlEncodedSpace();
         testStaticFileHandlerRejectsInvalidUrlEncoding();
         testStaticFileHandlerIgnoresQueryString();
@@ -757,16 +1519,31 @@ int main() {
         testStaticFileHandlerParsesExplicitByteRange();
         testStaticFileHandlerParsesOpenEndedByteRange();
         testStaticFileHandlerParsesSuffixByteRange();
+        testStaticFileHandlerKeepsLargeFilesOnSendfilePath();
+        testStaticFileHandlerKeepsLargeCompressibleFilesOnSendfilePath();
+        testStaticFileHandlerKeepsLargeRangeOnSendfilePath();
+        testStaticFileHandlerReloadsCachedFileWhenModified();
+        testStaticFileHandlerAddsStableEtag();
+        testStaticFileHandlerIfNoneMatchReturnsNotModified();
+        testStaticFileHandlerIfNoneMatchSupportsListsAndWeakEtags();
+        testStaticFileHandlerIfNoneMatchTakesPriorityOverRange();
+        testStaticFileHandlerRangeRunsWhenIfNoneMatchMisses();
+        testFileCacheEvictsLeastRecentlyUsedEntry();
         testStaticFileHandlerRejectsUnsatisfiableByteRange();
         testStaticFileHandlerRejectsInvalidByteRangeFormat();
         testHeadStaticFileRangeUsesPartialHeadersWithoutBody();
         testHeadStaticFileSuccessUsesGetHeadersWithoutBody();
         testHeadStaticFileNotFoundHasHeadersWithoutBody();
         testConfigParsesConnectionIdleTimeout();
-        testConfigDefaultsConnectionIdleTimeout();
+        testConfigDefaultsRequestLimits();
+        testConfigRejectsInvalidMaxRequestBodySize();
+        testConfigRejectsInvalidDirectoryListingFlag();
+        testConfigRejectsInvalidTlsFlag();
         testCommandLineUsesDefaultConfigPath();
         testCommandLineOverridesPort();
+        testCommandLineOverridesMaxRequestBodySize();
         testCommandLineRejectsInvalidPort();
+        testCommandLineRejectsInvalidMaxRequestBodySize();
         testCommandLineHelpOutput();
         testThreadPoolExecutesTask();
         testThreadPoolCreatesWorkerWhenThreadCountIsZero();

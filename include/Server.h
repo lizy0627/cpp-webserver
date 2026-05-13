@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 
+#include "Router.h"
 #include "StaticFileHandler.h"
 #include "ThreadPool.h"
 
@@ -16,6 +17,7 @@ struct HttpResponseResult {
     int statusCode = 0;
     std::size_t bodySize = 0;
     bool keepAlive = false;
+    bool closeAfterWrite = false;
     bool sendFile = false;
     std::string filePath;
     std::uintmax_t fileSize = 0;
@@ -30,7 +32,12 @@ public:
         unsigned short port,
         std::size_t threadCount,
         std::string rootDirectory,
-        std::chrono::seconds connectionIdleTimeout = std::chrono::seconds(30));
+        bool enableDirectoryListing,
+        std::chrono::seconds connectionIdleTimeout = std::chrono::seconds(30),
+        std::size_t maxRequestBodySize = 1024 * 1024,
+        bool enableTls = false,
+        std::string certFile = "cert.pem",
+        std::string keyFile = "key.pem");
     ~Server();
 
     Server(const Server&) = delete;
@@ -43,6 +50,7 @@ private:
     struct Impl;
 
     bool createSocket();
+    bool initializeTlsContext();
     bool createEventFd();
     bool createShutdownEventFd();
     bool installSignalHandlers();
@@ -56,6 +64,7 @@ private:
     void handleShutdownEvent();
     void readFromConnection(int epollFd, int fd);
     void writeToConnection(int epollFd, int fd);
+    bool driveTlsHandshake(int epollFd, int fd);
     void processReadBuffer(int epollFd, int fd);
     void queueResponse(
         int fd,
@@ -74,8 +83,13 @@ private:
 
     unsigned short port_;
     std::string rootDirectory_;
+    Router router_;
     StaticFileHandler staticFileHandler_;
     std::chrono::seconds connectionIdleTimeout_;
+    std::size_t maxRequestBodySize_;
+    bool enableTls_;
+    std::string certFile_;
+    std::string keyFile_;
     std::unique_ptr<Impl> impl_;
     ThreadPool threadPool_;
 };

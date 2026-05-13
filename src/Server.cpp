@@ -3,13 +3,16 @@
 #include "HttpParser.h"
 #include "HttpResponse.h"
 #include "Logger.h"
+#include "Router.h"
 #include "StaticFileHandler.h"
+#include "WebSocketHandshake.h"
 
 #include <arpa/inet.h>
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstdint>
@@ -31,9 +34,14 @@
 #include <utility>
 #include <vector>
 
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+
 namespace {
 constexpr std::size_t maxRequestHeaderSize = 8192;
+constexpr std::size_t defaultMaxRequestBodySize = 1024 * 1024;
 constexpr std::size_t maxSendfileBytesPerEvent = 1024 * 1024;
+constexpr std::size_t tlsFileChunkSize = 16 * 1024;
 constexpr int invalidFd = -1;
 constexpr int idleScanIntervalMs = 1000;
 constexpr std::chrono::seconds defaultConnectionIdleTimeout(30);
@@ -116,6 +124,32 @@ struct SignalHandlers {
     struct sigaction previousSigterm {};
 };
 
+struct SslDeleter {
+    void operator()(SSL* ssl) const {
+        if (ssl != nullptr) {
+            SSL_free(ssl);
+        }
+    }
+};
+
+struct SslCtxDeleter {
+    void operator()(SSL_CTX* context) const {
+        if (context != nullptr) {
+            SSL_CTX_free(context);
+        }
+    }
+};
+
+using UniqueSsl = std::unique_ptr<SSL, SslDeleter>;
+using UniqueSslCtx = std::unique_ptr<SSL_CTX, SslCtxDeleter>;
+
+enum class TlsOperation {
+    None,
+    Accept,
+    Read,
+    Write
+};
+
 bool wouldBlock() {
     return errno == EAGAIN || errno == EWOULDBLOCK;
 }
@@ -143,6 +177,10 @@ bool modifySocketInEpoll(int epollFd, int fd, uint32_t events) {
     return epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &event) != -1;
 }
 
+bool hasTlsWantEvent(unsigned int events) {
+    return (events & (EPOLLIN | EPOLLOUT)) != 0;
+}
+
 void removeSocketFromEpoll(int epollFd, int fd) {
     if (epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr) == -1 && errno != ENOENT && errno != EBADF) {
         Logger::warn("failed to remove fd from epoll");
@@ -166,12 +204,23 @@ HttpResponseResult makeResponseResult(HttpResponse response, bool keepAlive, boo
         response.bodySize(),
         keepAlive,
         false,
+        false,
         "",
         0,
         0,
         0,
         ""
     };
+}
+
+HttpResponseResult makeWebSocketUpgradeResponseResult(const std::string& accept) {
+    HttpResponseResult result;
+    result.response = WebSocketHandshake::switchingProtocolsResponse(accept);
+    result.statusCode = 101;
+    result.bodySize = 0;
+    result.keepAlive = false;
+    result.closeAfterWrite = true;
+    return result;
 }
 
 HttpResponseResult makeTextResponseResult(int statusCode,
@@ -185,6 +234,17 @@ HttpResponseResult makeTextResponseResult(int statusCode,
         includeBody);
 }
 
+HttpResponseResult makeBadWebSocketHandshakeResponseResult(bool includeBody) {
+    HttpResponseResult result = makeTextResponseResult(
+        400,
+        "Bad Request",
+        "Bad Request",
+        false,
+        includeBody);
+    result.closeAfterWrite = true;
+    return result;
+}
+
 HttpResponseResult makeStaticFileResponseResult(const StaticFileResult& file, bool keepAlive, bool includeBody) {
     if (file.status == StaticFileResult::Status::Ok) {
         HttpResponse response(
@@ -192,6 +252,13 @@ HttpResponseResult makeStaticFileResponseResult(const StaticFileResult& file, bo
             file.partialContent ? "Partial Content" : "OK");
         response.setContentType(file.contentType);
         response.setContentLength(static_cast<std::size_t>(file.contentLength));
+        if (!file.etag.empty()) {
+            response.setHeader("ETag", file.etag);
+        }
+        if (file.gzipEncoded) {
+            response.setHeader("Content-Encoding", "gzip");
+            response.setHeader("Vary", "Accept-Encoding");
+        }
         if (file.partialContent) {
             response.setHeader(
                 "Content-Range",
@@ -200,6 +267,12 @@ HttpResponseResult makeStaticFileResponseResult(const StaticFileResult& file, bo
                     std::to_string(file.fileSize));
         }
         response.setKeepAlive(keepAlive);
+
+        if (file.dynamicBody) {
+            response.setBody(file.body);
+            return makeResponseResult(std::move(response), keepAlive, includeBody);
+        }
+
         HttpResponseResult result = makeResponseResult(std::move(response), keepAlive, false);
         result.sendFile = includeBody;
         result.filePath = file.filePath.string();
@@ -208,6 +281,17 @@ HttpResponseResult makeStaticFileResponseResult(const StaticFileResult& file, bo
         result.fileTransferSize = file.contentLength;
         result.contentType = file.contentType;
         return result;
+    }
+
+    if (file.status == StaticFileResult::Status::NotModified) {
+        HttpResponse response(304, "Not Modified");
+        response.setContentType(file.contentType);
+        response.setContentLength(0);
+        response.setKeepAlive(keepAlive);
+        if (!file.etag.empty()) {
+            response.setHeader("ETag", file.etag);
+        }
+        return makeResponseResult(std::move(response), keepAlive, false);
     }
 
     if (file.status == StaticFileResult::Status::RangeNotSatisfiable) {
@@ -285,6 +369,10 @@ bool currentRequestHeaderTooLarge(const std::string& buffer) {
 
     return buffer.size() > maxRequestHeaderSize;
 }
+
+std::size_t bodyBytesInBuffer(const std::string& buffer, std::size_t headerLength) {
+    return buffer.size() > headerLength ? buffer.size() - headerLength : 0;
+}
 }
 
 struct Server::Impl {
@@ -293,6 +381,7 @@ struct Server::Impl {
         off_t offset = 0;
         std::uintmax_t size = 0;
         std::uintmax_t sent = 0;
+        std::string tlsBuffer;
 
         bool active() const {
             return file.valid() && sent < size;
@@ -303,23 +392,49 @@ struct Server::Impl {
             offset = 0;
             size = 0;
             sent = 0;
+            tlsBuffer.clear();
         }
     };
 
     struct Connection {
+        struct RequestBodyState {
+            bool active = false;
+            std::size_t headerLength = 0;
+            std::size_t bodyLength = 0;
+            HttpRequest request;
+            std::chrono::steady_clock::time_point requestStartTime = std::chrono::steady_clock::now();
+
+            void reset() {
+                active = false;
+                headerLength = 0;
+                bodyLength = 0;
+                request = HttpRequest();
+                requestStartTime = std::chrono::steady_clock::now();
+            }
+        };
+
         UniqueFd fd;
         unsigned long long id = 0;
         std::string readBuffer;
         std::string writeBuffer;
         FileTransfer fileTransfer;
+        RequestBodyState requestBody;
+        UniqueSsl ssl;
+        TlsOperation pendingTlsOperation = TlsOperation::None;
+        bool tlsHandshakeComplete = false;
         bool closeAfterWrite = true;
         bool responsePending = false;
         std::chrono::steady_clock::time_point lastActiveTime = std::chrono::steady_clock::now();
+
+        bool tlsEnabled() const {
+            return ssl != nullptr;
+        }
     };
 
     UniqueFd serverSocket;
     UniqueFd completionEvent;
     UniqueFd shutdownEvent;
+    UniqueSslCtx tlsContext;
     std::unordered_map<int, Connection> connections;
     std::mutex completionsMutex;
     std::deque<Completion> completions;
@@ -332,13 +447,22 @@ Server::Server(
     unsigned short port,
     std::size_t threadCount,
     std::string rootDirectory,
-    std::chrono::seconds connectionIdleTimeout)
+    bool enableDirectoryListing,
+    std::chrono::seconds connectionIdleTimeout,
+    std::size_t maxRequestBodySize,
+    bool enableTls,
+    std::string certFile,
+    std::string keyFile)
     : port_(port),
       rootDirectory_(std::move(rootDirectory)),
-      staticFileHandler_(rootDirectory_),
+      staticFileHandler_(rootDirectory_, enableDirectoryListing),
       connectionIdleTimeout_(connectionIdleTimeout > std::chrono::seconds::zero()
           ? connectionIdleTimeout
           : defaultConnectionIdleTimeout),
+      maxRequestBodySize_(maxRequestBodySize > 0 ? maxRequestBodySize : defaultMaxRequestBodySize),
+      enableTls_(enableTls),
+      certFile_(std::move(certFile)),
+      keyFile_(std::move(keyFile)),
       impl_(std::make_unique<Impl>()),
       threadPool_(threadCount) {}
 
@@ -347,6 +471,10 @@ Server::~Server() {
 }
 
 bool Server::start() {
+    if (enableTls_ && !initializeTlsContext()) {
+        return false;
+    }
+
     if (!createSocket()) {
         return false;
     }
@@ -372,7 +500,10 @@ bool Server::start() {
     }
 
     impl_->running.store(true);
-    Logger::info("Web server started at http://localhost:" + std::to_string(port_));
+    Logger::info(
+        std::string("Web server started at ") +
+        (enableTls_ ? "https" : "http") +
+        "://localhost:" + std::to_string(port_));
     acceptLoop();
     restoreSignalHandlers();
     Logger::info("Web server stopped");
@@ -407,6 +538,44 @@ bool Server::createSocket() {
     }
 
     impl_->serverSocket = std::move(socketFd);
+    return true;
+}
+
+bool Server::initializeTlsContext() {
+    OPENSSL_init_ssl(0, nullptr);
+    SSL_load_error_strings();
+
+    UniqueSslCtx context(SSL_CTX_new(TLS_server_method()));
+    if (context == nullptr) {
+        Logger::error("failed to create OpenSSL server context");
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    SSL_CTX_set_min_proto_version(context.get(), TLS1_2_VERSION);
+    SSL_CTX_set_mode(
+        context.get(),
+        SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+
+    if (SSL_CTX_use_certificate_file(context.get(), certFile_.c_str(), SSL_FILETYPE_PEM) != 1) {
+        Logger::error("failed to load TLS certificate: " + certFile_);
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(context.get(), keyFile_.c_str(), SSL_FILETYPE_PEM) != 1) {
+        Logger::error("failed to load TLS private key: " + keyFile_);
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    if (SSL_CTX_check_private_key(context.get()) != 1) {
+        Logger::error("TLS private key does not match certificate");
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    impl_->tlsContext = std::move(context);
     return true;
 }
 
@@ -631,6 +800,20 @@ void Server::acceptReadyClients(int epollFd) {
         connection.id = impl_->nextConnectionId++;
         connection.lastActiveTime = std::chrono::steady_clock::now();
 
+        if (enableTls_) {
+            UniqueSsl ssl(SSL_new(impl_->tlsContext.get()));
+            if (ssl == nullptr) {
+                Logger::error("failed to create TLS session for client");
+                ERR_print_errors_fp(stderr);
+                continue;
+            }
+
+            SSL_set_fd(ssl.get(), fd);
+            SSL_set_accept_state(ssl.get());
+            connection.ssl = std::move(ssl);
+            connection.pendingTlsOperation = TlsOperation::Accept;
+        }
+
         const auto inserted = impl_->connections.emplace(fd, std::move(connection));
         if (!inserted.second) {
             Logger::error("failed to track accepted client socket");
@@ -665,12 +848,109 @@ void Server::handleConnectionEvent(int epollFd, int fd, unsigned int events) {
         }
     }
 
+    auto connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end()) {
+        return;
+    }
+
+    if (connection->second.tlsEnabled() && !connection->second.tlsHandshakeComplete) {
+        const bool canReadApplicationDataAfterHandshake = (events & EPOLLIN) != 0;
+        if (hasTlsWantEvent(events)) {
+            if (!driveTlsHandshake(epollFd, fd)) {
+                return;
+            }
+
+            if (!canReadApplicationDataAfterHandshake) {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end()) {
+        return;
+    }
+
+    if (connection->second.pendingTlsOperation == TlsOperation::Read &&
+        hasTlsWantEvent(events)) {
+        connection->second.pendingTlsOperation = TlsOperation::None;
+        readFromConnection(epollFd, fd);
+        return;
+    }
+
+    if (connection->second.pendingTlsOperation == TlsOperation::Write &&
+        hasTlsWantEvent(events)) {
+        connection->second.pendingTlsOperation = TlsOperation::None;
+        writeToConnection(epollFd, fd);
+        return;
+    }
+
     if ((events & EPOLLIN) != 0) {
         readFromConnection(epollFd, fd);
     }
 
     if ((events & EPOLLOUT) != 0) {
-        writeToConnection(epollFd, fd);
+        const auto writableConnection = impl_->connections.find(fd);
+        if (writableConnection != impl_->connections.end() &&
+            (!writableConnection->second.writeBuffer.empty() ||
+             writableConnection->second.fileTransfer.active())) {
+            writeToConnection(epollFd, fd);
+        }
+    }
+}
+
+bool Server::driveTlsHandshake(int epollFd, int fd) {
+    const auto connection = impl_->connections.find(fd);
+    if (connection == impl_->connections.end() || !connection->second.tlsEnabled()) {
+        return false;
+    }
+
+    while (true) {
+        const int result = SSL_accept(connection->second.ssl.get());
+        if (result == 1) {
+            connection->second.tlsHandshakeComplete = true;
+            connection->second.pendingTlsOperation = TlsOperation::None;
+            connection->second.lastActiveTime = std::chrono::steady_clock::now();
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+                Logger::error("failed to register TLS client socket for read");
+                perror("epoll_ctl failed");
+                closeConnection(epollFd, fd);
+                return false;
+            }
+            return true;
+        }
+
+        const int error = SSL_get_error(connection->second.ssl.get(), result);
+        if (error == SSL_ERROR_WANT_READ) {
+            connection->second.pendingTlsOperation = TlsOperation::Accept;
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+                Logger::error("failed to register TLS handshake read interest");
+                perror("epoll_ctl failed");
+                closeConnection(epollFd, fd);
+            }
+            return false;
+        }
+
+        if (error == SSL_ERROR_WANT_WRITE) {
+            connection->second.pendingTlsOperation = TlsOperation::Accept;
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                Logger::error("failed to register TLS handshake write interest");
+                perror("epoll_ctl failed");
+                closeConnection(epollFd, fd);
+            }
+            return false;
+        }
+
+        if (error == SSL_ERROR_SYSCALL && errno == EINTR) {
+            continue;
+        }
+
+        Logger::error("TLS handshake failed");
+        ERR_print_errors_fp(stderr);
+        closeConnection(epollFd, fd);
+        return false;
     }
 }
 
@@ -778,11 +1058,55 @@ void Server::readFromConnection(int epollFd, int fd) {
 
     char buffer[4096]{};
     while (true) {
-        const ssize_t bytesRead = recv(fd, buffer, sizeof(buffer), 0);
+        ssize_t bytesRead = 0;
+        if (connection->second.tlsEnabled()) {
+            const int result = SSL_read(
+                connection->second.ssl.get(),
+                buffer,
+                static_cast<int>(sizeof(buffer)));
+            if (result > 0) {
+                bytesRead = result;
+                connection->second.pendingTlsOperation = TlsOperation::None;
+            } else {
+                const int error = SSL_get_error(connection->second.ssl.get(), result);
+                if (error == SSL_ERROR_WANT_READ) {
+                    connection->second.pendingTlsOperation = TlsOperation::Read;
+                    if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+                        closeConnection(epollFd, fd);
+                    }
+                    return;
+                }
+
+                if (error == SSL_ERROR_WANT_WRITE) {
+                    connection->second.pendingTlsOperation = TlsOperation::Read;
+                    if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                        closeConnection(epollFd, fd);
+                    }
+                    return;
+                }
+
+                if (error == SSL_ERROR_ZERO_RETURN) {
+                    closeConnection(epollFd, fd);
+                    return;
+                }
+
+                if (error == SSL_ERROR_SYSCALL && errno == EINTR) {
+                    continue;
+                }
+
+                Logger::error("SSL_read failed");
+                ERR_print_errors_fp(stderr);
+                closeConnection(epollFd, fd);
+                return;
+            }
+        } else {
+            bytesRead = recv(fd, buffer, sizeof(buffer), 0);
+        }
         if (bytesRead > 0) {
             connection->second.lastActiveTime = std::chrono::steady_clock::now();
             connection->second.readBuffer.append(buffer, static_cast<std::size_t>(bytesRead));
-            if (currentRequestHeaderTooLarge(connection->second.readBuffer)) {
+            if (!connection->second.requestBody.active &&
+                currentRequestHeaderTooLarge(connection->second.readBuffer)) {
                 const auto requestStartTime = std::chrono::steady_clock::now();
                 const HttpResponseResult response =
                     makeTextResponseResult(413, "Payload Too Large", "Payload Too Large");
@@ -795,7 +1119,34 @@ void Server::readFromConnection(int epollFd, int fd) {
                 return;
             }
 
-            if (hasCompleteHeader(connection->second.readBuffer)) {
+            if (connection->second.requestBody.active) {
+                const std::size_t expectedRequestLength =
+                    connection->second.requestBody.headerLength + connection->second.requestBody.bodyLength;
+                if (connection->second.readBuffer.size() >= expectedRequestLength) {
+                    processReadBuffer(epollFd, fd);
+                    return;
+                }
+
+                if (bodyBytesInBuffer(
+                        connection->second.readBuffer,
+                        connection->second.requestBody.headerLength) > maxRequestBodySize_) {
+                    const HttpRequest& request = connection->second.requestBody.request;
+                    const HttpResponseResult response =
+                        makeTextResponseResult(413, "Payload Too Large", "Payload Too Large");
+                    logAccess(
+                        request.method,
+                        request.path,
+                        response,
+                        connection->second.requestBody.requestStartTime);
+                    connection->second.requestBody.reset();
+                    connection->second.writeBuffer = response.response;
+                    connection->second.closeAfterWrite = true;
+                    if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                        closeConnection(epollFd, fd);
+                    }
+                    return;
+                }
+            } else if (hasCompleteHeader(connection->second.readBuffer)) {
                 processReadBuffer(epollFd, fd);
                 return;
             }
@@ -829,71 +1180,171 @@ void Server::writeToConnection(int epollFd, int fd) {
         return;
     }
 
+    auto flushBuffer = [&](std::string& buffer) -> bool {
+        while (!buffer.empty()) {
+            ssize_t bytesSent = 0;
+            if (connection->second.tlsEnabled()) {
+                const std::size_t chunkSize = std::min<std::size_t>(
+                    buffer.size(),
+                    static_cast<std::size_t>(INT_MAX));
+                const int result = SSL_write(
+                    connection->second.ssl.get(),
+                    buffer.data(),
+                    static_cast<int>(chunkSize));
+                if (result > 0) {
+                    bytesSent = result;
+                    connection->second.pendingTlsOperation = TlsOperation::None;
+                } else {
+                    const int error = SSL_get_error(connection->second.ssl.get(), result);
+                    if (error == SSL_ERROR_WANT_READ) {
+                        connection->second.pendingTlsOperation = TlsOperation::Write;
+                        if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+                            closeConnection(epollFd, fd);
+                        }
+                        return false;
+                    }
+
+                    if (error == SSL_ERROR_WANT_WRITE) {
+                        connection->second.pendingTlsOperation = TlsOperation::Write;
+                        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                            closeConnection(epollFd, fd);
+                        }
+                        return false;
+                    }
+
+                    if (error == SSL_ERROR_ZERO_RETURN) {
+                        closeConnection(epollFd, fd);
+                        return false;
+                    }
+
+                    if (error == SSL_ERROR_SYSCALL && errno == EINTR) {
+                        continue;
+                    }
+
+                    Logger::error("SSL_write failed");
+                    ERR_print_errors_fp(stderr);
+                    closeConnection(epollFd, fd);
+                    return false;
+                }
+            } else {
+                bytesSent = send(fd, buffer.data(), buffer.size(), 0);
+            }
+
+            if (bytesSent > 0) {
+                connection->second.lastActiveTime = std::chrono::steady_clock::now();
+                buffer.erase(0, static_cast<std::size_t>(bytesSent));
+                continue;
+            }
+
+            if (bytesSent == 0) {
+                return false;
+            }
+
+            if (errno == EINTR) {
+                continue;
+            }
+
+            if (wouldBlock()) {
+                return false;
+            }
+
+            Logger::error("send failed");
+            perror("send failed");
+            closeConnection(epollFd, fd);
+            return false;
+        }
+
+        return true;
+    };
+
     std::string& writeBuffer = connection->second.writeBuffer;
-    while (!writeBuffer.empty()) {
-        const ssize_t bytesSent = send(fd, writeBuffer.data(), writeBuffer.size(), 0);
-        if (bytesSent > 0) {
-            connection->second.lastActiveTime = std::chrono::steady_clock::now();
-            writeBuffer.erase(0, static_cast<std::size_t>(bytesSent));
-            continue;
-        }
-
-        if (bytesSent == 0) {
-            return;
-        }
-
-        if (errno == EINTR) {
-            continue;
-        }
-
-        if (wouldBlock()) {
-            return;
-        }
-
-        Logger::error("send failed");
-        perror("send failed");
-        closeConnection(epollFd, fd);
+    if (!flushBuffer(writeBuffer)) {
         return;
     }
 
     auto& fileTransfer = connection->second.fileTransfer;
-    std::size_t sendfileBudget = maxSendfileBytesPerEvent;
-    while (fileTransfer.active() && sendfileBudget > 0) {
-        const std::uintmax_t remaining = fileTransfer.size - fileTransfer.sent;
-        const std::size_t bytesToSend = static_cast<std::size_t>(std::min<std::uintmax_t>(
-            remaining,
-            sendfileBudget));
-        const ssize_t bytesSent = sendfile(
-            fd,
-            fileTransfer.file.get(),
-            &fileTransfer.offset,
-            bytesToSend);
+    if (connection->second.tlsEnabled()) {
+        while (fileTransfer.active()) {
+            if (fileTransfer.tlsBuffer.empty()) {
+                const std::uintmax_t remaining = fileTransfer.size - fileTransfer.sent;
+                const std::size_t bytesToRead = static_cast<std::size_t>(std::min<std::uintmax_t>(
+                    remaining,
+                    tlsFileChunkSize));
+                std::vector<char> fileBuffer(bytesToRead);
+                const ssize_t bytesRead = pread(
+                    fileTransfer.file.get(),
+                    fileBuffer.data(),
+                    bytesToRead,
+                    fileTransfer.offset + static_cast<off_t>(fileTransfer.sent));
 
-        if (bytesSent > 0) {
-            const auto sent = static_cast<std::uintmax_t>(bytesSent);
-            fileTransfer.sent += sent;
-            sendfileBudget -= static_cast<std::size_t>(bytesSent);
-            connection->second.lastActiveTime = std::chrono::steady_clock::now();
-            continue;
+                if (bytesRead > 0) {
+                    fileTransfer.tlsBuffer.assign(fileBuffer.data(), static_cast<std::size_t>(bytesRead));
+                } else if (bytesRead == 0) {
+                    fileTransfer.reset();
+                    break;
+                } else if (errno == EINTR) {
+                    continue;
+                } else if (wouldBlock()) {
+                    return;
+                } else {
+                    Logger::error("failed to read static file for TLS response");
+                    perror("pread failed");
+                    closeConnection(epollFd, fd);
+                    return;
+                }
+            }
+
+            const std::size_t bufferedBytes = fileTransfer.tlsBuffer.size();
+            if (!flushBuffer(fileTransfer.tlsBuffer)) {
+                const auto refreshedConnection = impl_->connections.find(fd);
+                if (refreshedConnection != impl_->connections.end()) {
+                    auto& refreshedTransfer = refreshedConnection->second.fileTransfer;
+                    refreshedTransfer.sent += bufferedBytes - refreshedTransfer.tlsBuffer.size();
+                }
+                return;
+            }
+
+            fileTransfer.sent += bufferedBytes;
         }
+    } else {
+        std::size_t sendfileBudget = maxSendfileBytesPerEvent;
+        while (fileTransfer.active() && sendfileBudget > 0) {
+            const std::uintmax_t remaining = fileTransfer.size - fileTransfer.sent;
+            const std::size_t bytesToSend = static_cast<std::size_t>(std::min<std::uintmax_t>(
+                remaining,
+                sendfileBudget));
+            const ssize_t bytesSent = sendfile(
+                fd,
+                fileTransfer.file.get(),
+                &fileTransfer.offset,
+                bytesToSend);
 
-        if (bytesSent == 0) {
-            fileTransfer.reset();
-            break;
-        }
+            if (bytesSent > 0) {
+                const auto sent = static_cast<std::uintmax_t>(bytesSent);
+                fileTransfer.sent += sent;
+                sendfileBudget -= static_cast<std::size_t>(bytesSent);
+                connection->second.lastActiveTime = std::chrono::steady_clock::now();
+                continue;
+            }
 
-        if (errno == EINTR) {
-            continue;
-        }
+            if (bytesSent == 0) {
+                fileTransfer.reset();
+                break;
+            }
 
-        if (wouldBlock()) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            if (wouldBlock()) {
+                return;
+            }
+
+            Logger::error("sendfile failed");
+            perror("sendfile failed");
+            closeConnection(epollFd, fd);
             return;
         }
-
-        Logger::error("sendfile failed");
-        perror("sendfile failed");
-        closeConnection(epollFd, fd);
-        return;
     }
 
     if (fileTransfer.active()) {
@@ -907,8 +1358,58 @@ void Server::writeToConnection(int epollFd, int fd) {
         return;
     }
 
-    if (hasCompleteHeader(connection->second.readBuffer)) {
+    if (connection->second.requestBody.active) {
+        const std::size_t expectedRequestLength =
+            connection->second.requestBody.headerLength + connection->second.requestBody.bodyLength;
+        if (connection->second.readBuffer.size() >= expectedRequestLength) {
+            processReadBuffer(epollFd, fd);
+            return;
+        }
+
+        if (bodyBytesInBuffer(
+                connection->second.readBuffer,
+                connection->second.requestBody.headerLength) > maxRequestBodySize_) {
+            const HttpRequest& request = connection->second.requestBody.request;
+            const auto requestStartTime = connection->second.requestBody.requestStartTime;
+            const HttpResponseResult response =
+                makeTextResponseResult(413, "Payload Too Large", "Payload Too Large");
+            logAccess(request.method, request.path, response, requestStartTime);
+            connection->second.requestBody.reset();
+            connection->second.writeBuffer = response.response;
+            connection->second.closeAfterWrite = true;
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                closeConnection(epollFd, fd);
+            }
+            return;
+        }
+    } else if (hasCompleteHeader(connection->second.readBuffer)) {
         processReadBuffer(epollFd, fd);
+        const auto refreshedConnection = impl_->connections.find(fd);
+        if (refreshedConnection != impl_->connections.end() &&
+            refreshedConnection->second.requestBody.active &&
+            refreshedConnection->second.writeBuffer.empty() &&
+            !refreshedConnection->second.fileTransfer.active() &&
+            !refreshedConnection->second.responsePending) {
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLIN | EPOLLRDHUP)) {
+                Logger::error("failed to register client socket for request body read");
+                perror("epoll_ctl failed");
+                closeConnection(epollFd, fd);
+            }
+        }
+        return;
+    }
+
+    if (!connection->second.requestBody.active &&
+        currentRequestHeaderTooLarge(connection->second.readBuffer)) {
+        const auto requestStartTime = std::chrono::steady_clock::now();
+        const HttpResponseResult response =
+            makeTextResponseResult(413, "Payload Too Large", "Payload Too Large");
+        logAccess("-", "-", response, requestStartTime);
+        connection->second.writeBuffer = response.response;
+        connection->second.closeAfterWrite = true;
+        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+            closeConnection(epollFd, fd);
+        }
         return;
     }
 
@@ -925,31 +1426,67 @@ void Server::processReadBuffer(int epollFd, int fd) {
         return;
     }
 
-    const std::size_t requestLength = completeHeaderLength(connection->second.readBuffer);
-    if (requestLength == std::string::npos) {
-        return;
-    }
-
-    const std::string rawRequest = connection->second.readBuffer.substr(0, requestLength);
-    const auto requestStartTime = std::chrono::steady_clock::now();
-    HttpRequest request;
-    if (!HttpParser::parse(rawRequest, request)) {
-        Logger::warn("bad request received");
-        const HttpResponseResult response = makeTextResponseResult(400, "Bad Request", "Bad Request");
-        logAccess("-", "-", response, requestStartTime);
-        connection->second.writeBuffer = response.response;
-        connection->second.closeAfterWrite = true;
-        if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
-            closeConnection(epollFd, fd);
+    if (!connection->second.requestBody.active) {
+        const std::size_t headerLength = completeHeaderLength(connection->second.readBuffer);
+        if (headerLength == std::string::npos) {
+            return;
         }
+
+        const std::string rawRequest = connection->second.readBuffer.substr(0, headerLength);
+        const auto requestStartTime = std::chrono::steady_clock::now();
+        HttpRequest parsedRequest;
+        if (!HttpParser::parse(rawRequest, parsedRequest)) {
+            Logger::warn("bad request received");
+            const HttpResponseResult response = makeTextResponseResult(400, "Bad Request", "Bad Request");
+            logAccess("-", "-", response, requestStartTime);
+            connection->second.writeBuffer = response.response;
+            connection->second.closeAfterWrite = true;
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                closeConnection(epollFd, fd);
+            }
+            return;
+        }
+
+        // Only POST handlers consume request bodies; GET/HEAD keep their existing no-body behavior.
+        const bool shouldReadBody = parsedRequest.method == "POST";
+        if (shouldReadBody && parsedRequest.contentLength > maxRequestBodySize_) {
+            const HttpResponseResult response =
+                makeTextResponseResult(413, "Payload Too Large", "Payload Too Large");
+            logAccess(parsedRequest.method, parsedRequest.path, response, requestStartTime);
+            connection->second.writeBuffer = response.response;
+            connection->second.closeAfterWrite = true;
+            if (!modifySocketInEpoll(epollFd, fd, EPOLLOUT | EPOLLRDHUP)) {
+                closeConnection(epollFd, fd);
+            }
+            return;
+        }
+
+        connection->second.requestBody.active = true;
+        connection->second.requestBody.headerLength = headerLength;
+        connection->second.requestBody.bodyLength = shouldReadBody ? parsedRequest.contentLength : 0;
+        connection->second.requestBody.request = std::move(parsedRequest);
+        connection->second.requestBody.requestStartTime = requestStartTime;
+    }
+
+    const std::size_t requestLength =
+        connection->second.requestBody.headerLength + connection->second.requestBody.bodyLength;
+    if (connection->second.readBuffer.size() < requestLength) {
         return;
     }
 
+    HttpRequest request = std::move(connection->second.requestBody.request);
+    const auto requestStartTime = connection->second.requestBody.requestStartTime;
+    request.body = connection->second.readBuffer.substr(
+        connection->second.requestBody.headerLength,
+        connection->second.requestBody.bodyLength);
+    connection->second.requestBody.reset();
     connection->second.lastActiveTime = std::chrono::steady_clock::now();
     connection->second.readBuffer.erase(0, requestLength);
     const bool closeAfterWrite = !request.keepAlive;
 
-    if (request.method != "GET" && request.method != "HEAD") {
+    if (!router_.isApiPath(request.path) &&
+        request.method != "GET" &&
+        request.method != "HEAD") {
         const HttpResponseResult response = makeTextResponseResult(
             405,
             "Method Not Allowed",
@@ -974,11 +1511,12 @@ void Server::processReadBuffer(int epollFd, int fd) {
 
     const bool enqueued = threadPool_.enqueue([this, fd, connectionId, request, requestStartTime]() {
         HttpResponseResult response = buildResponse(request);
+        const bool closeAfterWrite = response.closeAfterWrite || !request.keepAlive;
         queueResponse(
             fd,
             connectionId,
             std::move(response),
-            !request.keepAlive,
+            closeAfterWrite,
             request.method,
             request.path,
             requestStartTime);
@@ -1059,12 +1597,33 @@ void Server::closeConnection(int epollFd, int fd) {
 
 HttpResponseResult Server::buildResponse(const HttpRequest& request) const {
     try {
+        if (WebSocketHandshake::isEndpoint(request)) {
+            const std::optional<std::string> accept = WebSocketHandshake::acceptForRequest(request);
+            if (!accept.has_value()) {
+                return makeBadWebSocketHandshakeResponseResult(request.method != "HEAD");
+            }
+
+            return makeWebSocketUpgradeResponseResult(*accept);
+        }
+
+        if (const std::optional<HttpResponse> routed = router_.handle(request)) {
+            return makeResponseResult(*routed, request.keepAlive, request.method != "HEAD");
+        }
+
         const auto rangeHeader = request.headers.find("range");
+        const auto ifNoneMatchHeader = request.headers.find("if-none-match");
+        const auto acceptEncodingHeader = request.headers.find("accept-encoding");
         const StaticFileResult file = staticFileHandler_.handle(
             request.path,
             rangeHeader == request.headers.end()
                 ? std::nullopt
-                : std::optional<std::string>(rangeHeader->second));
+                : std::optional<std::string>(rangeHeader->second),
+            ifNoneMatchHeader == request.headers.end()
+                ? std::nullopt
+                : std::optional<std::string>(ifNoneMatchHeader->second),
+            acceptEncodingHeader == request.headers.end()
+                ? std::nullopt
+                : std::optional<std::string>(acceptEncodingHeader->second));
         return makeStaticFileResponseResult(file, request.keepAlive, request.method != "HEAD");
     } catch (const std::exception&) {
         Logger::error("internal server error while handling request");
